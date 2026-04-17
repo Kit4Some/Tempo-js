@@ -1,4 +1,4 @@
-import { B0_AlwaysFull, B1_EmaThreshold } from "../src/core/baselines.js";
+import { B0_AlwaysFull, B1_EmaThreshold } from "../src/core/schedulers.js";
 import { FRAME_BUDGET_60 } from "../src/core/constants.js";
 import { FrameMetrics } from "../src/harness/metrics.js";
 import {

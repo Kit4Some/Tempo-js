@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { B0_AlwaysFull, B1_EmaThreshold } from "../src/core/baselines.js";
+import { B0_AlwaysFull, B1_EmaThreshold } from "../src/core/schedulers.js";
 import {
   B1_DEGRADE_RATIO,
   B1_EMA_ALPHA,

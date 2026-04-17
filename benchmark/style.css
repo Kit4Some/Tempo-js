@@ -1,1 +1,80 @@
-/* Phase 4: dark theme, monospace, minimal. */
+/* Phase 2: minimal styling. Phase 4 rebuilds the page properly. */
+
+body {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  background: #111;
+  color: #eee;
+  padding: 1rem;
+  margin: 0;
+}
+
+h1 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0 0 1rem;
+  color: #0fa;
+}
+
+.controls {
+  display: flex;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background: #181818;
+  border: 1px solid #333;
+}
+
+.group {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+label {
+  color: #888;
+}
+
+button,
+select {
+  background: #222;
+  color: #eee;
+  border: 1px solid #444;
+  padding: 0.3rem 0.7rem;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover,
+select:hover {
+  background: #2a2a2a;
+}
+
+button[data-active="true"] {
+  background: #064;
+  border-color: #0a6;
+  color: #0fa;
+}
+
+.status {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  line-height: 1.5;
+}
+
+.status span {
+  color: #0fa;
+}
+
+.hint {
+  color: #777;
+  font-size: 0.9rem;
+  margin-top: 0.5rem;
+}
+
+code {
+  background: #222;
+  padding: 0.1rem 0.3rem;
+  color: #fa0;
+}

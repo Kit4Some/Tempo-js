@@ -3,11 +3,41 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Tempo — benchmark</title>
+    <title>Tempo — benchmark (Phase 2 init)</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <!-- Phase 4: live benchmark UI -->
+    <h1>Tempo — Phase 2 benchmark harness</h1>
+    <div class="controls">
+      <div class="group">
+        <label>Workload:</label>
+        <button data-workload="constant">constant</button>
+        <button data-workload="sawtooth">sawtooth</button>
+        <button data-workload="burst">burst</button>
+        <button data-workload="scroll">scroll</button>
+      </div>
+      <div class="group">
+        <label for="scheduler">Scheduler:</label>
+        <select id="scheduler">
+          <option value="B0">B0 (always full)</option>
+          <option value="B1" selected>B1 (EMA threshold)</option>
+        </select>
+      </div>
+      <div class="group">
+        <button id="start">Start</button>
+        <button id="stop">Stop</button>
+      </div>
+    </div>
+    <div class="status">
+      <div>Current workload: <span id="current-workload">—</span></div>
+      <div>Latest decision: <span id="decision">—</span></div>
+      <div>Frames recorded: <span id="frames">0</span></div>
+      <div class="hint">
+        Open DevTools → Console for per-second
+        <code>{ scheduler, workload, jankRate, p95 }</code>
+        output.
+      </div>
+    </div>
     <script type="module" src="./app.js"></script>
   </body>
 </html>

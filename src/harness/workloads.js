@@ -1,3 +1,15 @@
+import {
+  WL_BURST_BASE_MS,
+  WL_BURST_SPIKE_DURATION,
+  WL_BURST_SPIKE_EVERY,
+  WL_BURST_SPIKE_MS,
+  WL_CONSTANT_MS,
+  WL_SAWTOOTH_MAX,
+  WL_SAWTOOTH_MIN,
+  WL_SAWTOOTH_PERIOD,
+  WL_SCROLL_K,
+} from "../core/constants.js";
+
 function busyWait(ms) {
   if (ms <= 0) return;
   const start = performance.now();
@@ -6,13 +18,17 @@ function busyWait(ms) {
   }
 }
 
-export function constant(ms = 5) {
+export function constant(ms = WL_CONSTANT_MS) {
   return function constantLoad(_frameIdx) {
     busyWait(ms);
   };
 }
 
-export function sawtooth(min = 0, max = 20, periodFrames = 60) {
+export function sawtooth(
+  min = WL_SAWTOOTH_MIN,
+  max = WL_SAWTOOTH_MAX,
+  periodFrames = WL_SAWTOOTH_PERIOD,
+) {
   const span = max - min;
   return function sawtoothLoad(frameIdx) {
     const phase = ((frameIdx % periodFrames) + periodFrames) % periodFrames;
@@ -22,10 +38,10 @@ export function sawtooth(min = 0, max = 20, periodFrames = 60) {
 }
 
 export function burst(
-  baseMs = 3,
-  spikeMs = 30,
-  spikeEveryFrames = 90,
-  spikeDurationFrames = 5,
+  baseMs = WL_BURST_BASE_MS,
+  spikeMs = WL_BURST_SPIKE_MS,
+  spikeEveryFrames = WL_BURST_SPIKE_EVERY,
+  spikeDurationFrames = WL_BURST_SPIKE_DURATION,
 ) {
   return function burstLoad(frameIdx) {
     const inSpike =
@@ -36,7 +52,7 @@ export function burst(
   };
 }
 
-export function scrollCorrelated(scrollVelocityFn, k = 0.3) {
+export function scrollCorrelated(scrollVelocityFn, k = WL_SCROLL_K) {
   return function scrollCorrelatedLoad(_frameIdx) {
     const v = Math.abs(scrollVelocityFn());
     busyWait(v * k);

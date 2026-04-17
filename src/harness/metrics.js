@@ -1,18 +1,24 @@
+import {
+  FRAME_BUDGET_60,
+  METRICS_BUFFER_SIZE,
+  PERCENTILE_P95,
+  PERCENTILE_P99,
+} from "../core/constants.js";
+
 const DEFAULT_RAF =
   typeof requestAnimationFrame !== "undefined" ? requestAnimationFrame : null;
 const DEFAULT_CAF =
   typeof cancelAnimationFrame !== "undefined" ? cancelAnimationFrame : null;
-const BUFFER_SIZE = 1024;
 
 export class FrameMetrics {
   constructor(
-    budgetMs = 16.67,
+    budgetMs = FRAME_BUDGET_60,
     { raf = DEFAULT_RAF, caf = DEFAULT_CAF } = {},
   ) {
     this._budget = budgetMs;
     this._raf = raf;
     this._caf = caf;
-    this._buf = new Float32Array(BUFFER_SIZE);
+    this._buf = new Float32Array(METRICS_BUFFER_SIZE);
     this._frameCount = 0;
     this._prevTs = null;
     this._running = false;
@@ -45,7 +51,7 @@ export class FrameMetrics {
   }
 
   getStats() {
-    const n = Math.min(this._frameCount, BUFFER_SIZE);
+    const n = Math.min(this._frameCount, METRICS_BUFFER_SIZE);
     if (n === 0) {
       return {
         jankRate: 0,
@@ -57,7 +63,7 @@ export class FrameMetrics {
     }
     const snap = new Float32Array(n);
     snap.set(
-      this._frameCount < BUFFER_SIZE
+      this._frameCount < METRICS_BUFFER_SIZE
         ? this._buf.subarray(0, n)
         : this._buf,
     );
@@ -70,8 +76,8 @@ export class FrameMetrics {
     }
     return {
       jankRate: jank / n,
-      p95: snap[Math.min(n - 1, Math.floor(n * 0.95))],
-      p99: snap[Math.min(n - 1, Math.floor(n * 0.99))],
+      p95: snap[Math.min(n - 1, Math.floor(n * PERCENTILE_P95))],
+      p99: snap[Math.min(n - 1, Math.floor(n * PERCENTILE_P99))],
       meanDt: sum / n,
       frameCount: this._frameCount,
     };
@@ -87,7 +93,7 @@ export class FrameMetrics {
     if (this._prevTs != null) {
       const dt = ts - this._prevTs;
       const frameIdx = this._frameCount;
-      this._buf[frameIdx % BUFFER_SIZE] = dt;
+      this._buf[frameIdx % METRICS_BUFFER_SIZE] = dt;
       this._frameCount++;
       for (const cb of this._callbacks) cb(frameIdx, dt);
     }

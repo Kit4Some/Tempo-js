@@ -1,0 +1,17 @@
+{
+  "name": "tempo",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Tempo — a 353-parameter online-learning MLP that predicts browser frame budget overruns. Research artifact.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "puppeteer": "^23.0.0",
+    "vite": "^5.4.0",
+    "vitest": "^2.1.0"
+  }
+}

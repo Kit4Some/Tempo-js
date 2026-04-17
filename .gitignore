@@ -7,6 +7,10 @@ shadow.json
 .vitest-cache/
 coverage/
 
+# Tooling local state (Claude Code / OMC)
+.claude/
+.omc/
+
 # OS
 .DS_Store
 Thumbs.db

@@ -79,4 +79,10 @@ export const MLP_OUTPUT_DIM = 1;
 // sum is 353); we pin PARAM_COUNT here and align the rest of the codebase.
 export const PARAM_COUNT = 353;
 
+// BCE loss clamp epsilon. p_miss is clamped to [PRED_LOSS_EPS, 1-PRED_LOSS_EPS]
+// in both Predictor.loss() and Predictor.backward()'s dL/dz3 computation to
+// keep log() finite and to keep the two computations using the same value of
+// p (matters for gradcheck consistency).
+export const PRED_LOSS_EPS = 1e-7;
+
 // Part 3 will add: LR, MOMENTUM, GRAD_CLIP, TRAIN_BUFFER_SIZE, BATCH_SIZE.

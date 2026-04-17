@@ -65,7 +65,18 @@ export const PRED_DEGRADE_THRESHOLD = 0.3;
 // Architecture, learning, and training-buffer hyperparameters.
 // Kept separate from scheduler thresholds: policy-level knobs (above) and
 // model-level knobs (here) are ablated independently in Phase 5 §6.5.
-//
-// Populated during Phase 3 Parts 1–3:
-//   Part 1 (forward): MLP_HIDDEN_1, MLP_HIDDEN_2, PARAM_COUNT
-//   Part 3 (trainer): LR, MOMENTUM, GRAD_CLIP, TRAIN_BUFFER_SIZE, BATCH_SIZE
+
+// Architecture (spec §2.1): x(12) → Linear(12→16) → ReLU → Linear(16→8) →
+// ReLU → Linear(8→1) → Sigmoid → p_miss.
+export const MLP_INPUT_DIM = 12;
+export const MLP_HIDDEN_1 = 16;
+export const MLP_HIDDEN_2 = 8;
+export const MLP_OUTPUT_DIM = 1;
+
+// Parameter count: W1(16×12) + b1(16) + W2(8×16) + b2(8) + W3(1×8) + b3(1)
+//                = 192 + 16 + 128 + 8 + 8 + 1 = 353.
+// The spec §2.1 diagram's "321" was an arithmetic mistake (bias-inclusive
+// sum is 353); we pin PARAM_COUNT here and align the rest of the codebase.
+export const PARAM_COUNT = 353;
+
+// Part 3 will add: LR, MOMENTUM, GRAD_CLIP, TRAIN_BUFFER_SIZE, BATCH_SIZE.

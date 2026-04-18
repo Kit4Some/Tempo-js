@@ -85,4 +85,30 @@ export const PARAM_COUNT = 353;
 // p (matters for gradcheck consistency).
 export const PRED_LOSS_EPS = 1e-7;
 
-// Part 3 will add: LR, MOMENTUM, GRAD_CLIP, TRAIN_BUFFER_SIZE, BATCH_SIZE.
+// Training hyperparameters (spec §2.3). OnlineTrainer defaults; callers can
+// override via constructor options.
+// LR was 1e-4 in the original spec; raised to 1e-3 after the convergence
+// diagnostic in commit "refactor(phase-3): tune LR to 1e-3". Effective step
+// size at steady-state momentum is lr / (1 - mu) × avgGradNorm ≈ 3.5e-3,
+// which reaches loss<0.1 well inside the 10k-step budget.
+export const LR = 1e-3;
+export const MOMENTUM = 0.9;
+export const GRAD_CLIP = 1.0; // L2 norm threshold; clip applied to averaged grad
+export const TRAIN_BUFFER_SIZE = 1024;
+export const BATCH_SIZE = 16;
+
+// === Feature extraction ====================================================
+// FeatureExtractor (spec §2.2): produces a 12-dim Float32 vector per frame.
+
+// EMA smoothing for normalized dt (dt / FRAME_BUDGET_60).
+export const DT_EMA_FAST_ALPHA = 0.3;
+export const DT_EMA_SLOW_ALPHA = 0.05;
+
+// Rolling window sizes over raw dt (ms).
+export const DT_WINDOW_SHORT = 8; // used by dt_var and dt_max_8
+export const DT_WINDOW_MISS = 32; // used by miss_rate_32; also backs dt_var/max
+
+// Device tier mapping from navigator.hardwareConcurrency (spec §2.2 feature 12).
+export const DEVICE_TIER_LOW_MAX = 2; // hw ≤ this → tier 0
+export const DEVICE_TIER_MID_MAX = 8; // hw ≤ this → tier 1, else tier 2
+export const DEVICE_TIER_DEFAULT = 1; // used when hardwareConcurrency is undefined

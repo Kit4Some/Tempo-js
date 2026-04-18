@@ -1,4 +1,8 @@
-import { FRAME_BUDGET_60, METRICS_BUFFER_SIZE } from "../core/constants.js";
+import {
+  FRAME_BUDGET_60,
+  JANK_TOLERANCE_MS,
+  METRICS_BUFFER_SIZE,
+} from "../core/constants.js";
 import { RollingFrameMetrics } from "./metrics.js";
 import { workCostFor } from "./work-cost.js";
 
@@ -113,7 +117,7 @@ export class SequentialLoop {
   step(observeExtras = {}) {
     const now1 = this._now();
     const dt = this._lastNow == null ? 0 : now1 - this._lastNow;
-    const wasMiss = dt > FRAME_BUDGET_60;
+    const wasMiss = dt > FRAME_BUDGET_60 + JANK_TOLERANCE_MS;
 
     this._metrics[this._active].all.record(dt);
     this._metrics[this._active].recent.record(dt);

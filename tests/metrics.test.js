@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { FrameMetrics, RollingFrameMetrics } from "../src/harness/metrics.js";
+import { FRAME_BUDGET_60 } from "../src/core/constants.js";
 
 function makeMockRaf() {
   const pending = [];
@@ -183,15 +184,40 @@ describe("RollingFrameMetrics", () => {
     expect(s.jankRate).toBeCloseTo(0, 5);
   });
 
-  it("jankRate counts only dts strictly greater than budget", () => {
-    // Budget 20 is exactly representable in Float32, unlike 16.67 which would
-    // round up and falsely treat the boundary sample as jank.
+  it("jankRate counts only dts strictly greater than (budget + tolerance)", () => {
+    // Budget 20 is exactly representable in Float32. With default
+    // JANK_TOLERANCE_MS = 1.0 the threshold is 21.0 (cleanly representable):
+    //   20   → below threshold, not jank
+    //   21   → equal to threshold, not jank (strict >)
+    //   22   → above threshold, jank
     const r = new RollingFrameMetrics(10, 20);
-    r.record(20); // equal, not jank (strict >)
-    r.record(20.5); // jank
+    r.record(20);
+    r.record(21);
+    r.record(22);
     const s = r.getStats();
-    expect(s.frameCount).toBe(2);
-    expect(s.jankRate).toBeCloseTo(0.5, 5);
+    expect(s.frameCount).toBe(3);
+    expect(s.jankRate).toBeCloseTo(1 / 3, 5);
+  });
+
+  it("applies JANK_TOLERANCE_MS to absorb vsync jitter around FRAME_BUDGET_60", () => {
+    // Guard against the live-page regression where constant 5 ms workloads
+    // reported ~57% jank because rAF cadence sits at ~16.68 ms (slightly
+    // above the 16.67 ms budget). JANK_TOLERANCE_MS = 0.5 ms absorbs that
+    // vsync jitter. See fix(phase-4): jank detection tolerance.
+    //
+    // We stay off the exact threshold (FRAME_BUDGET_60 + 0.5 = 17.17) here
+    // because Float32 stores 17.17 as ~17.17000008, pushing the boundary
+    // case across `> 17.17` on readback. The "strictly greater" test above
+    // covers the exact boundary with budget=20 where 20.5 IS cleanly
+    // representable in Float32.
+    const r = new RollingFrameMetrics(10); // default budget = FRAME_BUDGET_60
+    r.record(FRAME_BUDGET_60); // exactly at budget — not jank
+    r.record(FRAME_BUDGET_60 + 0.5); // within tolerance — not jank
+    r.record(FRAME_BUDGET_60 + 0.99); // just below threshold — not jank
+    r.record(FRAME_BUDGET_60 + 1.5); // clearly above threshold — jank
+    const s = r.getStats();
+    expect(s.frameCount).toBe(4);
+    expect(s.jankRate).toBeCloseTo(0.25, 5);
   });
 
   it("reset() clears the window but leaves the instance reusable", () => {

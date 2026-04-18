@@ -26,6 +26,7 @@ import {
   DT_WINDOW_MISS,
   DT_WINDOW_SHORT,
   FRAME_BUDGET_60,
+  JANK_TOLERANCE_MS,
   MLP_INPUT_DIM,
 } from "./constants.js";
 
@@ -206,7 +207,7 @@ export class FeatureExtractor {
       for (let i = 0; i < missWindow; i++) {
         const idx =
           (this._dtWriteIdx - 1 - i + DT_WINDOW_MISS) % DT_WINDOW_MISS;
-        if (this._dtBuffer[idx] > budget) misses++;
+        if (this._dtBuffer[idx] > budget + JANK_TOLERANCE_MS) misses++;
       }
       out[4] = misses / missWindow;
     } else {

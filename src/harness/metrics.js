@@ -1,5 +1,6 @@
 import {
   FRAME_BUDGET_60,
+  JANK_TOLERANCE_MS,
   METRICS_BUFFER_SIZE,
   PERCENTILE_P95,
   PERCENTILE_P99,
@@ -71,7 +72,7 @@ export class FrameMetrics {
     let jank = 0;
     let sum = 0;
     for (let i = 0; i < n; i++) {
-      if (snap[i] > this._budget) jank++;
+      if (snap[i] > this._budget + JANK_TOLERANCE_MS) jank++;
       sum += snap[i];
     }
     return {
@@ -152,7 +153,7 @@ export class RollingFrameMetrics {
     let jank = 0;
     let sum = 0;
     for (let i = 0; i < n; i++) {
-      if (snap[i] > this._budget) jank++;
+      if (snap[i] > this._budget + JANK_TOLERANCE_MS) jank++;
       sum += snap[i];
     }
     return {

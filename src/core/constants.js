@@ -7,6 +7,26 @@
 // benchmark thresholds and blog-post numbers human-readable.
 export const FRAME_BUDGET_60 = 16.67;
 
+// Jank detection tolerance. rAF callbacks are vsync-aligned and fire at
+// multiples of ~16.67 ms on a 60 Hz display, but the actual delta has ~0.1–0.3
+// ms of float jitter from scheduler/OS variance — a strict `dt > 16.67` check
+// falsely classifies that noise as jank. Phase 4 live-page verification
+// measured ~57% "jank" on a constant 5ms workload (actual work 1.75ms) due
+// to this jitter; the Predictor's Phase 5 Go/No-Go then depends on a 15%
+// difference that would otherwise be swamped by the measurement noise.
+// 1.0 ms margin swallows the jitter without hiding real misses (anything
+// >17.67 ms is a genuine missed frame on 60 Hz). Applied at every jank
+// comparison: FrameMetrics, RollingFrameMetrics, SequentialLoop.step's
+// wasMiss, and FeatureExtractor's miss_rate_32.
+//
+// Calibration history: 0.5 ms was tried first — live page constant-5ms
+// workload reported ~14% jank (down from 57% pre-tolerance) because P95
+// consistently sat at 18 ms from Canvas paint + heatmap update overhead
+// that rIC only mostly isolates. Raised to 1.0 ms per user calibration
+// spec; 2.0 ms would start hiding real jank and demands a different root
+// cause (not vsync jitter).
+export const JANK_TOLERANCE_MS = 1.0;
+
 // === Metrics ===============================================================
 // FrameMetrics ring buffer capacity. Bounds memory at 4 KB per instance
 // (Float32Array * 1024) while still covering >17s of 60fps history.

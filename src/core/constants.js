@@ -61,6 +61,19 @@ export const B1_DEGRADE_RATIO = 1.2;
 export const PRED_REDUCE_THRESHOLD = 0.1;
 export const PRED_DEGRADE_THRESHOLD = 0.3;
 
+// Phase 4 UI — work-cost scale applied to the workload's base frame cost when
+// a Scheduler's decision is executed on the live benchmark page (Sequential
+// mode, one active scheduler at a time). Ratios approximate a real UI
+// framework's decorative/essential split (Framer Motion et al.):
+//   full    — 100% of the workload's base cost.
+//   reduce  — skip decorative frames (~30%), keep essential work.
+//   degrade — CSS-transition fallback; compositing + parse overhead remain.
+// These are NOT physical measurements — sensitivity to these numbers must be
+// documented in blog post §6.5 (limitations).
+export const COST_FULL = 1.0;
+export const COST_REDUCE = 0.7;
+export const COST_DEGRADE = 0.35;
+
 // === Predictor (MLP) =======================================================
 // Architecture, learning, and training-buffer hyperparameters.
 // Kept separate from scheduler thresholds: policy-level knobs (above) and

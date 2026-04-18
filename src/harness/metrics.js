@@ -101,3 +101,66 @@ export class FrameMetrics {
     this._schedule();
   }
 }
+
+/**
+ * Fixed-size rolling window of the most recent N frame dts. Phase 4 UI uses
+ * this alongside FrameMetrics (lifetime) to show both "Jank (All)" and
+ * "Jank (300f)" columns per scheduler — the rolling view surfaces reactivity
+ * of the Predictor as it learns, which the lifetime view smooths away.
+ *
+ * Semantics differ from FrameMetrics:
+ *   - `record(dt)` is called explicitly by the caller (no rAF loop).
+ *   - `frameCount` in getStats() is the CURRENT WINDOW SIZE (clamped to
+ *     windowSize), not the lifetime count. A caller that needs lifetime
+ *     count should use FrameMetrics.
+ *   - Otherwise returns the same shape as FrameMetrics.getStats() so UI code
+ *     can treat both symmetrically.
+ */
+export class RollingFrameMetrics {
+  constructor(windowSize = 300, budgetMs = FRAME_BUDGET_60) {
+    this._size = windowSize;
+    this._budget = budgetMs;
+    this._buf = new Float32Array(windowSize);
+    this._count = 0;
+  }
+
+  record(dt) {
+    this._buf[this._count % this._size] = dt;
+    this._count++;
+  }
+
+  reset() {
+    this._count = 0;
+  }
+
+  getStats() {
+    const n = Math.min(this._count, this._size);
+    if (n === 0) {
+      return {
+        jankRate: 0,
+        p95: 0,
+        p99: 0,
+        meanDt: 0,
+        frameCount: 0,
+      };
+    }
+    const snap = new Float32Array(n);
+    snap.set(
+      this._count < this._size ? this._buf.subarray(0, n) : this._buf,
+    );
+    snap.sort();
+    let jank = 0;
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+      if (snap[i] > this._budget) jank++;
+      sum += snap[i];
+    }
+    return {
+      jankRate: jank / n,
+      p95: snap[Math.min(n - 1, Math.floor(n * PERCENTILE_P95))],
+      p99: snap[Math.min(n - 1, Math.floor(n * PERCENTILE_P99))],
+      meanDt: sum / n,
+      frameCount: n,
+    };
+  }
+}

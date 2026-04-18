@@ -284,6 +284,10 @@ function clearStatus() {
 }
 
 function setRunStopEnabled(running) {
+  // Run-all-3 owns full control of every button while active — without this
+  // early return, start()'s call during each phase's 'started' event would
+  // re-enable stop-btn that setControlsForRunAll just disabled.
+  if (runAllActive) return;
   const run = document.getElementById("run-btn");
   const stopBtn = document.getElementById("stop-btn");
   if (run) run.disabled = running;
@@ -291,6 +295,8 @@ function setRunStopEnabled(running) {
 }
 
 // --- Run-all-3 orchestration ----------------------------------------------
+
+let runAllActive = false;
 
 const NON_RUNALL_CONTROLS = [
   "workload-select",
@@ -316,6 +322,7 @@ async function handleRunAll() {
 
   btn.innerHTML = "Cancel";
   btn.addEventListener("click", onCancel, { once: true });
+  runAllActive = true;
   setControlsForRunAll(true);
   stop();
 
@@ -324,6 +331,11 @@ async function handleRunAll() {
     if (p.kind === "started") {
       state.activeName = p.name;
       state.loop.setActive(p.name);
+      // Sync the dropdown UI so the selected option matches the currently
+      // running scheduler — otherwise Cancel leaves the dropdown stuck on
+      // the pre-Run-all-3 value while state.activeName is the last phase.
+      const schedulerSelect = document.getElementById("scheduler-select");
+      if (schedulerSelect) schedulerSelect.value = p.name;
       // Rebuild chart for the new scheduler's color + fresh history.
       const chartCanvas = document.getElementById("chart-canvas");
       state.chart = new LineChart(chartCanvas, {
@@ -364,7 +376,10 @@ async function handleRunAll() {
   } finally {
     btn.innerHTML = originalLabel;
     btn.removeEventListener("click", onCancel);
+    runAllActive = false;
     setControlsForRunAll(false);
+    // Re-apply run/stop state for whatever post-sequence running state is.
+    setRunStopEnabled(state?.running ?? false);
   }
 }
 

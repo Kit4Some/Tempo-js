@@ -7,6 +7,7 @@ import {
   PARAM_COUNT,
   PRED_LOSS_EPS,
 } from "../src/core/constants.js";
+import { mulberry32 } from "./helpers/rng.js";
 
 function makeInput(fill = 0) {
   const x = new Float32Array(MLP_INPUT_DIM);
@@ -121,6 +122,25 @@ describe("Predictor — He initialization", () => {
     for (let i = 0; i < 192; i++) if (p.params[i] !== 0) nonZero++;
     expect(nonZero).toBeGreaterThan(150); // overwhelmingly non-zero
   });
+
+  it("two Predictors built from the same seeded RNG produce identical weights", () => {
+    const a = new Predictor({ rng: mulberry32(7) });
+    const b = new Predictor({ rng: mulberry32(7) });
+    for (let i = 0; i < PARAM_COUNT; i++) {
+      expect(a.params[i]).toBe(b.params[i]);
+    }
+  });
+
+  it("two Predictors built from different seeds produce different weights", () => {
+    const a = new Predictor({ rng: mulberry32(1) });
+    const b = new Predictor({ rng: mulberry32(2) });
+    let differing = 0;
+    for (let i = 0; i < PARAM_COUNT; i++) {
+      if (a.params[i] !== b.params[i]) differing++;
+    }
+    // Most weight entries (all but biases) should differ.
+    expect(differing).toBeGreaterThan(300);
+  });
 });
 
 describe("Predictor.loss — BCE with symmetric clamp", () => {
@@ -198,20 +218,20 @@ describe("Predictor.backward — shape & sanity", () => {
 });
 
 describe("Predictor — numerical gradient check", () => {
-  function randomInput() {
+  function randomInput(rng) {
     const x = new Float32Array(MLP_INPUT_DIM);
     // Small scale keeps p_miss away from sigmoid saturation with He-init.
-    for (let i = 0; i < x.length; i++) x[i] = (Math.random() - 0.5) * 0.5;
+    for (let i = 0; i < x.length; i++) x[i] = (rng() - 0.5) * 0.5;
     return x;
   }
 
-  function makeGradcheckFixture(predictor) {
+  function makeGradcheckFixture(predictor, rng) {
     // Reject samples that land near the ReLU boundary (z ≈ 0) or sigmoid
     // saturation (p_miss at the extremes). A small eps-perturbation at a
     // ReLU-boundary pre-activation would flip the mask between f(θ+eps) and
     // f(θ-eps), producing spurious numeric gradients.
     for (let tries = 0; tries < 200; tries++) {
-      const x = randomInput();
+      const x = randomInput(rng);
       const { p_miss, hidden } = predictor.forward(x);
       let zMin = Infinity;
       for (const z of hidden.z1) {
@@ -232,13 +252,16 @@ describe("Predictor — numerical gradient check", () => {
   it(
     "analytic gradient matches numerical across 3 fixtures × 353 params (rel < 1e-4)",
     () => {
-      const p = new Predictor();
+      // Seeded RNG: init, fixture sampling, and target selection all feed off
+      // the same deterministic stream so a failure is a real bug, not luck.
+      const rng = mulberry32(42);
+      const p = new Predictor({ rng });
       const eps = 1e-4;
       const tolerance = 1e-4;
 
       for (let fixId = 0; fixId < 3; fixId++) {
-        const x = makeGradcheckFixture(p);
-        const target = Math.random() < 0.5 ? 0 : 1;
+        const x = makeGradcheckFixture(p, rng);
+        const target = rng() < 0.5 ? 0 : 1;
         // Snapshot analytic gradients (backward returns a buffer reused
         // across calls; copy so subsequent loss() calls can't touch it).
         const analytic = new Float32Array(p.backward(x, target));

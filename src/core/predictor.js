@@ -31,15 +31,23 @@ const B2_OFFSET = W2_OFFSET + MLP_HIDDEN_2 * MLP_HIDDEN_1;
 const W3_OFFSET = B2_OFFSET + MLP_HIDDEN_2;
 const B3_OFFSET = W3_OFFSET + MLP_OUTPUT_DIM * MLP_HIDDEN_2;
 
-function gaussianSample() {
-  // Box-Muller. Math.random avoids log(0) by mapping to (0, 1].
-  const u = 1 - Math.random();
-  const v = Math.random();
+function gaussianSample(rng) {
+  // Box-Muller. Map (0, 1] so log() is never applied to 0.
+  const u = 1 - rng();
+  const v = rng();
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
 
 export class Predictor {
-  constructor() {
+  /**
+   * @param {object} [options]
+   * @param {() => number} [options.rng=Math.random] — uniform [0, 1) RNG used
+   *   for He weight initialization. Inject a seeded RNG from tests so
+   *   convergence/gradcheck results are reproducible. Production paths keep
+   *   the default Math.random.
+   */
+  constructor({ rng = Math.random } = {}) {
+    this._rng = rng;
     this.params = new Float32Array(PARAM_COUNT);
 
     // Pre-allocated hidden activations reused across forward calls.
@@ -71,15 +79,16 @@ export class Predictor {
 
   _initHe() {
     const p = this.params;
+    const rng = this._rng;
     // W1: N(0, sqrt(2/fan_in)), fan_in = MLP_INPUT_DIM
     const s1 = Math.sqrt(2 / MLP_INPUT_DIM);
-    for (let i = W1_OFFSET; i < B1_OFFSET; i++) p[i] = gaussianSample() * s1;
+    for (let i = W1_OFFSET; i < B1_OFFSET; i++) p[i] = gaussianSample(rng) * s1;
     // W2: fan_in = MLP_HIDDEN_1
     const s2 = Math.sqrt(2 / MLP_HIDDEN_1);
-    for (let i = W2_OFFSET; i < B2_OFFSET; i++) p[i] = gaussianSample() * s2;
+    for (let i = W2_OFFSET; i < B2_OFFSET; i++) p[i] = gaussianSample(rng) * s2;
     // W3: fan_in = MLP_HIDDEN_2
     const s3 = Math.sqrt(2 / MLP_HIDDEN_2);
-    for (let i = W3_OFFSET; i < B3_OFFSET; i++) p[i] = gaussianSample() * s3;
+    for (let i = W3_OFFSET; i < B3_OFFSET; i++) p[i] = gaussianSample(rng) * s3;
     // Biases initialized to 0 (Float32Array zero-fills on construction).
   }
 

@@ -74,6 +74,19 @@ export const COST_FULL = 1.0;
 export const COST_REDUCE = 0.7;
 export const COST_DEGRADE = 0.35;
 
+// Run-all-3 pacing. Live and headless protocols deliberately diverge:
+//   - Live (Phase 4): 30 s per scheduler + 10 s cooldown = 110 s total.
+//     Total ≤ ~2 min so a blog visitor won't assume the tab is frozen.
+//   - Headless (Phase 5 §5): 60 s per scheduler + 10 s cooldown = 200 s.
+//     Longer runs give Mann-Whitney U the sample size it needs; a Puppeteer
+//     worker has no UX budget to worry about.
+// README should call out the divergence: "Live demo uses shorter runs (30 s)
+// for UX; headless benchmark uses 60 s per §5 protocol."
+export const LIVE_RUN_MS = 30_000;
+export const LIVE_COOLDOWN_MS = 10_000;
+export const HEADLESS_RUN_MS = 60_000;
+export const HEADLESS_COOLDOWN_MS = 10_000;
+
 // === Predictor (MLP) =======================================================
 // Architecture, learning, and training-buffer hyperparameters.
 // Kept separate from scheduler thresholds: policy-level knobs (above) and

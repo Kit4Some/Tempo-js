@@ -107,6 +107,17 @@ button.run-all .hint {
   border-radius: 2px;
 }
 
+.status-line {
+  margin-top: 0.6rem;
+  padding: 0.4rem 0.7rem;
+  background: rgba(77, 208, 225, 0.05);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent-pred);
+  color: var(--text-dim);
+  font-size: 0.9em;
+  border-radius: 2px;
+}
+
 main {
   display: grid;
   grid-template-columns: 55% 45%;

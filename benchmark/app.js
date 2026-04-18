@@ -1,9 +1,21 @@
-// Phase 4 commit 4: frame loop + shared FeatureExtractor + Sequential
-// execution wiring. DOM controls (button clicks, select onchange, Run-all-3
-// orchestration) are deliberately deferred to commit 5 — this commit
-// auto-starts the default configuration (workload=constant, active=Predictor
-// from the HTML select defaults) and exposes `window.tempo` for console
-// debugging so commit 5 can focus on UI binding.
+// Phase 4 commit 5: integration — wires charts, heatmap, stats table,
+// DOM controls, and Run-all-3 to the SequentialLoop from commit 4.
+//
+// Control semantics (per commit 5 decision 5):
+//   - Workload onchange → stop + init + start (new workload invalidates
+//     accumulated metrics, so a fresh loop is correct).
+//   - Active onchange    → loop.setActive() only. SequentialLoop was
+//     designed to swap active without losing metric history — keeping the
+//     table populated lets the user compare runs side-by-side in place.
+//   - Run               → start() (no reset; accumulate over prior data).
+//   - Reset             → stop + init + start (explicit clean-slate).
+//   - Run all 3         → async sequence (B0 → cooldown → B1 → cooldown →
+//     Predictor) with per-scheduler reset for independent runs; disables
+//     other controls; Run-all-3 button morphs into Cancel.
+//
+// rIC render cadence (decision 2): trainTick every idle tick; paint/stats
+// throttled to ≥1 Hz so a 300-point redraw + heatmap + stats rebuild never
+// competes with the active frame loop.
 
 import { SequentialLoop } from "../src/harness/sequential-loop.js";
 import { Predictor } from "../src/core/predictor.js";
@@ -15,7 +27,10 @@ import {
   PredictorScheduler,
 } from "../src/core/schedulers.js";
 import { LineChart, LayeredHeatmap, makeDefaultLayers } from "./charts.js";
+import { buildStatsRows, runSequence } from "./live-controls.js";
 import {
+  LIVE_COOLDOWN_MS,
+  LIVE_RUN_MS,
   WL_BURST_BASE_MS,
   WL_BURST_SPIKE_DURATION,
   WL_BURST_SPIKE_EVERY,
@@ -27,9 +42,8 @@ import {
   WL_SCROLL_K,
 } from "../src/core/constants.js";
 
-// Mulberry32 — 3-line seeded PRNG. Inlined here rather than imported from
-// tests/helpers so there's no src → tests dependency; if a third caller
-// emerges, promote to src/core/rng.js.
+// --- Helpers ---------------------------------------------------------------
+
 function mulberry32(seed) {
   let a = seed >>> 0;
   return () => {
@@ -41,9 +55,6 @@ function mulberry32(seed) {
   };
 }
 
-// Production busyWait. Workloads.js has a private copy for its own
-// in-module cost functions — reproducing it here keeps this file
-// standalone without exposing internal workload helpers.
 function realBusyWait(ms) {
   if (ms <= 0) return;
   const start = performance.now();
@@ -52,9 +63,26 @@ function realBusyWait(ms) {
   }
 }
 
-// Map a workload select value to a cost-only function (no busyWait inside
-// — SequentialLoop applies workCostFor() multiplier and calls busyWait
-// itself). Math mirrors workloads.js; a future refactor may consolidate.
+function realSleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("aborted", "AbortError"));
+      return;
+    }
+    const tid = setTimeout(resolve, ms);
+    if (signal) {
+      signal.addEventListener(
+        "abort",
+        () => {
+          clearTimeout(tid);
+          reject(new DOMException("aborted", "AbortError"));
+        },
+        { once: true },
+      );
+    }
+  });
+}
+
 let fakeScrollT = 0;
 function scrollVelocity() {
   fakeScrollT += 1;
@@ -110,8 +138,20 @@ function makeFactory(seed) {
   };
 }
 
-// Module-level runtime handle. Commit 5's DOM handlers will mutate .active
-// and .workload via start/stop/reset cycles.
+function colorFor(activeName) {
+  switch (activeName) {
+    case "B0":
+      return "#888";
+    case "B1":
+      return "#ff9b3d";
+    case "Predictor":
+    default:
+      return "#4dd0e1";
+  }
+}
+
+// --- Runtime state + lifecycle --------------------------------------------
+
 let state = null;
 
 function init(seed = 42, workloadName = "constant", activeName = "Predictor") {
@@ -127,7 +167,7 @@ function init(seed = 42, workloadName = "constant", activeName = "Predictor") {
   const heatmapCanvas = document.getElementById("heatmap-canvas");
   const chart = new LineChart(chartCanvas, {
     maxPoints: 300,
-    strokeStyle: activeName === "B0" ? "#888" : activeName === "B1" ? "#ff9b3d" : "#4dd0e1",
+    strokeStyle: colorFor(activeName),
   });
   const heatmap = new LayeredHeatmap(heatmapCanvas, {
     layers: makeDefaultLayers(),
@@ -142,7 +182,9 @@ function init(seed = 42, workloadName = "constant", activeName = "Predictor") {
     running: false,
     rafId: null,
     ricId: null,
+    lastRender: 0,
   };
+  renderStatsTable();
   return state;
 }
 
@@ -158,16 +200,21 @@ function scheduleFrame() {
 function scheduleIdle() {
   if (!state || !state.running) return;
   state.ricId = requestIdleCallback((deadline) => {
-    // trainTick first (cheaper than paint + has upstream gradient work).
+    // trainTick runs every idle tick (if there's budget) — cheap enough
+    // that a higher cadence keeps the Predictor learning responsively.
     if (state.activeName === "Predictor" && deadline.timeRemaining() > 2) {
       state.loop.trainTick();
     }
-    // Heatmap + chart repaint. rIC cadence keeps paint off the rAF critical
-    // path so the benchmark page doesn't self-referentially jank.
-    if (deadline.timeRemaining() > 1) {
+    // Paint + stats throttled to ~1 Hz. 300-point chart redraw + 353-cell
+    // heatmap + 3-row table is light, but doing it every idle tick on a
+    // burst workload shows up in DevTools Performance.
+    const now = performance.now();
+    if (now - state.lastRender > 1000 && deadline.timeRemaining() > 1) {
       state.heatmap.update(state.loop.getParams());
       state.heatmap.render();
       state.chart.render();
+      renderStatsTable();
+      state.lastRender = now;
     }
     scheduleIdle();
   });
@@ -176,8 +223,10 @@ function scheduleIdle() {
 function start() {
   if (!state || state.running) return;
   state.running = true;
+  state.lastRender = 0; // force a render on the first idle tick
   scheduleFrame();
   scheduleIdle();
+  setRunStopEnabled(true);
 }
 
 function stop() {
@@ -191,7 +240,135 @@ function stop() {
     cancelIdleCallback(state.ricId);
     state.ricId = null;
   }
+  setRunStopEnabled(false);
 }
+
+function reset() {
+  if (!state) return;
+  stop();
+  init(state.seed, state.workloadName, state.activeName);
+  start();
+}
+
+// --- DOM writes -----------------------------------------------------------
+
+function renderStatsTable() {
+  if (!state) return;
+  const tbody = document.querySelector("#stats-table tbody");
+  if (!tbody) return;
+  const rows = buildStatsRows(state.loop.getMetrics(), state.activeName);
+  tbody.innerHTML = rows
+    .map(
+      (r) =>
+        `<tr data-scheduler="${r.name}"${r.active ? ' class="active"' : ""}>` +
+        `<th scope="row">${r.name}</th>` +
+        `<td>${r.jankAll}</td>` +
+        `<td>${r.jankRecent}</td>` +
+        `<td>${r.p95All}</td>` +
+        `<td>${r.p95Recent}</td>` +
+        `<td>${r.meanDt}</td>` +
+        `</tr>`,
+    )
+    .join("");
+}
+
+function setStatus(text) {
+  const el = document.getElementById("status-line");
+  if (!el) return;
+  el.textContent = text;
+  el.hidden = text.length === 0;
+}
+
+function clearStatus() {
+  setStatus("");
+}
+
+function setRunStopEnabled(running) {
+  const run = document.getElementById("run-btn");
+  const stopBtn = document.getElementById("stop-btn");
+  if (run) run.disabled = running;
+  if (stopBtn) stopBtn.disabled = !running;
+}
+
+// --- Run-all-3 orchestration ----------------------------------------------
+
+const NON_RUNALL_CONTROLS = [
+  "workload-select",
+  "scheduler-select",
+  "run-btn",
+  "stop-btn",
+  "reset-btn",
+];
+
+function setControlsForRunAll(running) {
+  for (const id of NON_RUNALL_CONTROLS) {
+    const el = document.getElementById(id);
+    if (el) el.disabled = running;
+  }
+}
+
+async function handleRunAll() {
+  if (!state) return;
+  const btn = document.getElementById("run-all-btn");
+  const originalLabel = btn.innerHTML;
+  const ctrl = new AbortController();
+  const onCancel = () => ctrl.abort();
+
+  btn.innerHTML = "Cancel";
+  btn.addEventListener("click", onCancel, { once: true });
+  setControlsForRunAll(true);
+  stop();
+
+  const phaseLog = [];
+  const onPhase = (p) => {
+    if (p.kind === "started") {
+      state.activeName = p.name;
+      state.loop.setActive(p.name);
+      // Rebuild chart for the new scheduler's color + fresh history.
+      const chartCanvas = document.getElementById("chart-canvas");
+      state.chart = new LineChart(chartCanvas, {
+        maxPoints: 300,
+        strokeStyle: colorFor(p.name),
+      });
+      const summary = phaseLog.length ? phaseLog.join(" ") + " " : "";
+      setStatus(`${summary}Now running ${p.name} (${p.index + 1}/${p.total})`);
+      start();
+    } else if (p.kind === "finished") {
+      stop();
+      const jank =
+        state.loop.getMetrics()[p.name].all.getStats().jankRate * 100;
+      phaseLog.push(`${p.name} done (jank ${jank.toFixed(1)}%).`);
+      setStatus(phaseLog.join(" "));
+    } else if (p.kind === "cooldown") {
+      setStatus(
+        phaseLog.join(" ") + ` Cooling down ${(LIVE_COOLDOWN_MS / 1000) | 0}s…`,
+      );
+    } else if (p.kind === "complete") {
+      setStatus(phaseLog.join(" ") + " Run all 3 complete.");
+    }
+  };
+
+  try {
+    await runSequence({
+      loop: state.loop,
+      signal: ctrl.signal,
+      onPhase,
+      runMs: LIVE_RUN_MS,
+      cooldownMs: LIVE_COOLDOWN_MS,
+      sleep: realSleep,
+    });
+  } catch (e) {
+    if (e?.name !== "AbortError") throw e;
+    setStatus(phaseLog.join(" ") + " Cancelled.");
+    stop();
+  } finally {
+    btn.innerHTML = originalLabel;
+    btn.removeEventListener("click", onCancel);
+    setControlsForRunAll(false);
+  }
+}
+
+// --- Event wiring ---------------------------------------------------------
 
 function detectSupport() {
   return typeof window.requestIdleCallback === "function";
@@ -200,10 +377,50 @@ function detectSupport() {
 function showUnsupportedWarning() {
   const banner = document.getElementById("unsupported-browser");
   if (banner) banner.hidden = false;
-  for (const id of ["run-btn", "run-all-btn"]) {
+  for (const id of ["run-btn", "run-all-btn", "reset-btn"]) {
     const el = document.getElementById(id);
     if (el) el.disabled = true;
   }
+}
+
+function wireControls() {
+  const workloadSelect = document.getElementById("workload-select");
+  const schedulerSelect = document.getElementById("scheduler-select");
+  const runBtn = document.getElementById("run-btn");
+  const stopBtn = document.getElementById("stop-btn");
+  const resetBtn = document.getElementById("reset-btn");
+  const runAllBtn = document.getElementById("run-all-btn");
+
+  workloadSelect?.addEventListener("change", (e) => {
+    clearStatus();
+    stop();
+    init(state.seed, e.target.value, state.activeName);
+    start();
+  });
+
+  schedulerSelect?.addEventListener("change", (e) => {
+    const name = e.target.value;
+    state.activeName = name;
+    state.loop.setActive(name);
+    // Recreate chart so the line color + history match the new scheduler.
+    const chartCanvas = document.getElementById("chart-canvas");
+    state.chart = new LineChart(chartCanvas, {
+      maxPoints: 300,
+      strokeStyle: colorFor(name),
+    });
+    renderStatsTable();
+  });
+
+  runBtn?.addEventListener("click", () => {
+    clearStatus();
+    start();
+  });
+  stopBtn?.addEventListener("click", () => stop());
+  resetBtn?.addEventListener("click", () => {
+    clearStatus();
+    reset();
+  });
+  runAllBtn?.addEventListener("click", handleRunAll);
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -217,11 +434,6 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("scheduler-select")?.value ?? "Predictor";
   init(42, workloadName, activeName);
   start();
-  // Expose for console debugging + commit 5 DOM handler wiring.
-  window.tempo = {
-    init,
-    start,
-    stop,
-    getState: () => state,
-  };
+  wireControls();
+  window.tempo = { init, start, stop, reset, getState: () => state };
 });

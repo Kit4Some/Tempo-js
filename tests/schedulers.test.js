@@ -1,16 +1,45 @@
 import { describe, it, expect } from "vitest";
-import { B0_AlwaysFull, B1_EmaThreshold } from "../src/core/schedulers.js";
+import {
+  B0_AlwaysFull,
+  B1_EmaThreshold,
+  PredictorScheduler,
+} from "../src/core/schedulers.js";
 import {
   B1_DEGRADE_RATIO,
   B1_EMA_ALPHA,
   B1_REDUCE_RATIO,
   FRAME_BUDGET_60,
+  PRED_DEGRADE_THRESHOLD,
+  PRED_REDUCE_THRESHOLD,
 } from "../src/core/constants.js";
+import { Predictor } from "../src/core/predictor.js";
+import { OnlineTrainer } from "../src/core/trainer.js";
+import { mulberry32 } from "./helpers/rng.js";
 
 function featureVec(f0) {
   const v = new Float32Array(12);
   v[0] = f0;
   return v;
+}
+
+/**
+ * Minimal Predictor stub that returns a fixed p_miss. Lets threshold tests
+ * drive the decision without fighting Float32 rounding in a real sigmoid.
+ */
+function mockPredictor(fixedPMiss) {
+  return {
+    _out: { p_miss: fixedPMiss },
+    forward(_x) {
+      return this._out;
+    },
+  };
+}
+
+function makeRealScheduler() {
+  const predictor = new Predictor({ rng: mulberry32(1) });
+  const trainer = new OnlineTrainer(predictor, { rng: mulberry32(1) });
+  const scheduler = new PredictorScheduler({ predictor, trainer });
+  return { predictor, trainer, scheduler };
 }
 
 describe("B0_AlwaysFull", () => {
@@ -129,5 +158,162 @@ describe("B1_EmaThreshold — EMA update", () => {
     // EMA must still advance (shadow-mode requirement).
     for (let i = 0; i < 5; i++) s.onFrameComplete(10, false);
     expect(s.getEma()).toBeGreaterThan(0);
+  });
+});
+
+describe("PredictorScheduler — threshold mapping", () => {
+  // Use a mock predictor so p_miss is set exactly. A real Predictor's sigmoid
+  // at a float32-rounded b3 can drift a few 1e-8 off the target, which would
+  // make exact-boundary assertions against strict `>` flaky.
+  function schedWithP(pMiss) {
+    const predictor = mockPredictor(pMiss);
+    // Trainer is unused by decide(); pass a real one to satisfy the contract.
+    const real = new Predictor({ rng: mulberry32(1) });
+    const trainer = new OnlineTrainer(real, { rng: mulberry32(1) });
+    return new PredictorScheduler({ predictor, trainer });
+  }
+
+  it("p_miss clearly below PRED_REDUCE_THRESHOLD → 'full'", () => {
+    expect(schedWithP(0.05).decide(featureVec(0))).toBe("full");
+    expect(schedWithP(0).decide(featureVec(0))).toBe("full");
+  });
+
+  it("PRED_REDUCE_THRESHOLD < p_miss ≤ PRED_DEGRADE_THRESHOLD → 'reduce'", () => {
+    expect(schedWithP(0.2).decide(featureVec(0))).toBe("reduce");
+  });
+
+  it("p_miss > PRED_DEGRADE_THRESHOLD → 'degrade'", () => {
+    expect(schedWithP(0.5).decide(featureVec(0))).toBe("degrade");
+    expect(schedWithP(0.99).decide(featureVec(0))).toBe("degrade");
+  });
+
+  it("exact boundary p_miss = PRED_REDUCE_THRESHOLD (0.1) → 'full' (strict >)", () => {
+    expect(schedWithP(PRED_REDUCE_THRESHOLD).decide(featureVec(0))).toBe("full");
+  });
+
+  it("exact boundary p_miss = PRED_DEGRADE_THRESHOLD (0.3) → 'reduce' (strict >)", () => {
+    expect(schedWithP(PRED_DEGRADE_THRESHOLD).decide(featureVec(0))).toBe(
+      "reduce",
+    );
+  });
+});
+
+describe("PredictorScheduler — priority override", () => {
+  it("options.priority='high' forces 'full' regardless of p_miss", () => {
+    const predictor = mockPredictor(0.9);
+    const real = new Predictor({ rng: mulberry32(1) });
+    const trainer = new OnlineTrainer(real, { rng: mulberry32(1) });
+    const s = new PredictorScheduler({ predictor, trainer });
+    expect(s.decide(featureVec(0), { priority: "high" })).toBe("full");
+  });
+
+  it("priority='normal' or missing does not alter the rule", () => {
+    const predictor = mockPredictor(0.5);
+    const real = new Predictor({ rng: mulberry32(1) });
+    const trainer = new OnlineTrainer(real, { rng: mulberry32(1) });
+    const s = new PredictorScheduler({ predictor, trainer });
+    expect(s.decide(featureVec(0))).toBe("degrade");
+    expect(s.decide(featureVec(0), { priority: "normal" })).toBe("degrade");
+    expect(s.decide(featureVec(0), { priority: "low" })).toBe("degrade");
+  });
+
+  it("options.tag is metadata and MUST NOT affect the decision", () => {
+    const predictor = mockPredictor(0.2);
+    const real = new Predictor({ rng: mulberry32(1) });
+    const trainer = new OnlineTrainer(real, { rng: mulberry32(1) });
+    const s = new PredictorScheduler({ predictor, trainer });
+    expect(s.decide(featureVec(0), { tag: "abc" })).toBe("reduce");
+    expect(s.decide(featureVec(0), { tag: "xyz" })).toBe("reduce");
+  });
+
+  it("priority='high' still records features for onFrameComplete (subtle)", () => {
+    // Even though we early-return 'full' without calling predictor.forward,
+    // we must have captured the feature vector so a subsequent
+    // onFrameComplete pushes the right sample into the trainer.
+    const { scheduler, trainer } = makeRealScheduler();
+    const x = featureVec(0.77);
+    scheduler.decide(x, { priority: "high" });
+    scheduler.onFrameComplete(25, true);
+    expect(trainer.bufferCount()).toBe(1);
+    expect(trainer._features[0]).toBeCloseTo(0.77, 6);
+  });
+});
+
+describe("PredictorScheduler — features copy (reference-leak guard)", () => {
+  it("mutating the caller's features after decide() does not affect the stored sample", () => {
+    const { scheduler, trainer } = makeRealScheduler();
+    const x = featureVec(0.42);
+    scheduler.decide(x);
+    x[0] = 999; // caller mutates after decide — MUST NOT leak
+    scheduler.onFrameComplete(20, true);
+    expect(trainer.bufferCount()).toBe(1);
+    expect(trainer._features[0]).toBeCloseTo(0.42, 6);
+  });
+});
+
+describe("PredictorScheduler — onFrameComplete → trainer.push", () => {
+  it("pushes (last features, wasMiss ? 1 : 0) once per decide+complete pair", () => {
+    const { scheduler, trainer } = makeRealScheduler();
+    const x = featureVec(0.61);
+    scheduler.decide(x);
+    scheduler.onFrameComplete(30, true);
+    expect(trainer.bufferCount()).toBe(1);
+    expect(trainer._features[0]).toBeCloseTo(0.61, 6);
+    expect(trainer._targets[0]).toBe(1);
+  });
+
+  it("wasMiss=false pushes target=0", () => {
+    const { scheduler, trainer } = makeRealScheduler();
+    scheduler.decide(featureVec(0.3));
+    scheduler.onFrameComplete(10, false);
+    expect(trainer._targets[0]).toBe(0);
+  });
+});
+
+describe("PredictorScheduler — first-frame guard", () => {
+  it("onFrameComplete without a prior decide() does NOT push a sample", () => {
+    const { scheduler, trainer } = makeRealScheduler();
+    scheduler.onFrameComplete(10, false);
+    expect(trainer.bufferCount()).toBe(0);
+  });
+
+  it("after the first decide(), onFrameComplete pushes normally", () => {
+    const { scheduler, trainer } = makeRealScheduler();
+    scheduler.onFrameComplete(10, false); // ignored (no features yet)
+    scheduler.decide(featureVec(0.4));
+    scheduler.onFrameComplete(10, false); // now records
+    expect(trainer.bufferCount()).toBe(1);
+  });
+});
+
+describe("PredictorScheduler — shadow-mode integration", () => {
+  it("three schedulers fed the same features+dt all advance their state", () => {
+    // Simulates a Sequential+Shadow benchmark tick: one features/dt stream,
+    // three schedulers each call decide() + onFrameComplete() in lockstep.
+    const predictor = new Predictor({ rng: mulberry32(7) });
+    const trainer = new OnlineTrainer(predictor, { rng: mulberry32(7) });
+    const pred = new PredictorScheduler({ predictor, trainer });
+    const b0 = new B0_AlwaysFull();
+    const b1 = new B1_EmaThreshold();
+
+    const x = new Float32Array(12);
+    for (let i = 0; i < 32; i++) {
+      x[0] = (i % 5) * 0.25;
+      const dt = (i % 5) * 6 + 8; // varies 8..32ms
+      const wasMiss = dt > FRAME_BUDGET_60;
+      // Decide and complete for every scheduler — contract §4 Phase 2.
+      b0.decide(x);
+      b0.onFrameComplete(dt, wasMiss);
+      b1.decide(x);
+      b1.onFrameComplete(dt, wasMiss);
+      pred.decide(x);
+      pred.onFrameComplete(dt, wasMiss);
+    }
+
+    // Predictor trainer accumulated 32 samples even though only one
+    // scheduler is "active" at a time in real benchmark semantics.
+    expect(trainer.bufferCount()).toBe(32);
+    // B1 EMA advanced.
+    expect(b1.getEma()).toBeGreaterThan(0);
   });
 });

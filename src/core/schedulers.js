@@ -32,6 +32,9 @@ import {
   B1_EMA_ALPHA,
   B1_REDUCE_RATIO,
   FRAME_BUDGET_60,
+  MLP_INPUT_DIM,
+  PRED_DEGRADE_THRESHOLD,
+  PRED_REDUCE_THRESHOLD,
 } from "./constants.js";
 
 /**
@@ -101,5 +104,87 @@ export class B1_EmaThreshold {
   /** @returns {number} Current internal EMA of dt (ms). Exposed for tests. */
   getEma() {
     return this._ema;
+  }
+}
+
+/**
+ * PredictorScheduler: Scheduler adapter around a Predictor + OnlineTrainer.
+ *
+ * Design (spec §4 Phase 3 Part 4):
+ *   - Injects predictor + trainer. No internal FeatureExtractor — the harness
+ *     owns extraction so all three schedulers (B0/B1/Predictor) see the same
+ *     features vector per frame, which is a prerequisite for the Sequential +
+ *     Shadow benchmark (§5 / §4 Phase 5).
+ *   - decide() copies the feature vector into _lastFeatures BEFORE the
+ *     priority override check; onFrameComplete() pairs that cached vector
+ *     with (wasMiss ? 1 : 0) and pushes into the trainer. The copy-before-
+ *     override order is load-bearing: a 'high' priority frame still produces
+ *     a valid training sample.
+ *   - trainStep() is the HARNESS's responsibility (call it from
+ *     requestIdleCallback, or on an arbitrary cadence). Keeping it out of
+ *     the adapter lets Phase 5 ablate "train every frame" vs "train every
+ *     100 frames" without changing adapter internals.
+ *   - First-frame guard: if onFrameComplete fires before any decide() (can
+ *     happen when a scheduler is observed in shadow before its first active
+ *     invocation, or simply at startup), the push is skipped — we have no
+ *     features to pair with the observed dt.
+ *
+ * @implements {Scheduler}
+ */
+export class PredictorScheduler {
+  /**
+   * @param {object} deps
+   * @param {import("./predictor.js").Predictor} deps.predictor
+   * @param {import("./trainer.js").OnlineTrainer} deps.trainer
+   */
+  constructor({ predictor, trainer }) {
+    this.predictor = predictor;
+    this.trainer = trainer;
+    this._lastFeatures = new Float32Array(MLP_INPUT_DIM);
+    this._hasLastFeatures = false;
+  }
+
+  /**
+   * @param {Float32Array} features — length MLP_INPUT_DIM (§2.2)
+   * @param {SchedulerOptions} [options]
+   * @returns {Decision}
+   */
+  decide(features, options) {
+    // Copy features first — onFrameComplete() needs this even when priority
+    // override short-circuits the forward pass below.
+    this._lastFeatures.set(features);
+    this._hasLastFeatures = true;
+
+    if (options && options.priority === "high") return "full";
+
+    this.predictor.forward(features);
+    const p = this.predictor._out.p_miss;
+
+    if (p > PRED_DEGRADE_THRESHOLD) return "degrade";
+    if (p > PRED_REDUCE_THRESHOLD) return "reduce";
+    return "full";
+  }
+
+  /**
+   * Scheduler contract (spec §4 Phase 2):
+   *   - Called after EVERY frame, for EVERY scheduler.
+   *   - `dt` reflects the ACTIVE scheduler's execution, not this scheduler's
+   *     hypothetical alternative.
+   *   - Schedulers MUST NOT assume this dt resulted from their own decision.
+   *
+   * We push (_lastFeatures, wasMiss ? 1 : 0) into the trainer so the
+   * Predictor learns from every observed outcome, active or shadow. This is
+   * the implementation origin of Phase 6's "we train from counterfactual
+   * observations" limitation — do not remove or weaken this comment when
+   * refactoring.
+   *
+   * @param {number} dt
+   * @param {boolean} wasMiss
+   */
+  // eslint-disable-next-line no-unused-vars
+  onFrameComplete(dt, wasMiss) {
+    if (!this._hasLastFeatures) return; // first-frame guard
+    this.trainer.push(this._lastFeatures, wasMiss ? 1 : 0);
+    // trainStep() is NOT called here — harness owns the training cadence.
   }
 }

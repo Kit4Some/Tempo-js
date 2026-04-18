@@ -6,6 +6,12 @@ import {
 import { RollingFrameMetrics } from "./metrics.js";
 import { workCostFor } from "./work-cost.js";
 
+// Shadow decisions are encoded as Uint8 codes (0/1/2) rather than strings
+// so per-frame logging is zero-allocation. Translation happens once at
+// getShadowLog() time.
+const DECISION_CODE = { full: 0, reduce: 1, degrade: 2 };
+const DECISION_NAMES = ["full", "reduce", "degrade"];
+
 /**
  * Sequential benchmark loop (spec §4 Phase 4, decision 1).
  *
@@ -30,6 +36,7 @@ export class SequentialLoop {
     busyWait,
     now,
     initialActive = "Predictor",
+    shadowLog = null,
   }) {
     if (typeof buildState !== "function") {
       throw new TypeError("SequentialLoop: buildState must be a function");
@@ -49,6 +56,7 @@ export class SequentialLoop {
     this._busyWait = busyWait;
     this._now = now;
     this._active = initialActive;
+    this._shadowConfig = shadowLog; // { maxFrames } or null
     this._buildInternal();
   }
 
@@ -73,6 +81,28 @@ export class SequentialLoop {
         recent: new RollingFrameMetrics(300),
       },
     };
+
+    // Shadow log uses contiguous TypedArray buffers (not object arrays) so
+    // per-frame logging does no allocation and no GC pressure. Decision is
+    // encoded as Uint8 per scheduler (0/1/2); extract/serialize happens
+    // only once at getShadowLog() time.
+    if (this._shadowConfig) {
+      const max = this._shadowConfig.maxFrames;
+      if (!Number.isInteger(max) || max <= 0) {
+        throw new RangeError(
+          `SequentialLoop: shadowLog.maxFrames must be a positive integer, got ${max}`,
+        );
+      }
+      this._shadow = {
+        dt: new Float32Array(max),
+        miss: new Uint8Array(max),
+        decisions: new Uint8Array(max * 3), // [B0, B1, Predictor] per frame
+        count: 0,
+        max,
+      };
+    } else {
+      this._shadow = null;
+    }
   }
 
   setActive(name) {
@@ -134,6 +164,16 @@ export class SequentialLoop {
       decisions[name] = schedulers[name].decide(features);
     }
 
+    if (this._shadow && this._shadow.count < this._shadow.max) {
+      const i = this._shadow.count;
+      this._shadow.dt[i] = dt;
+      this._shadow.miss[i] = wasMiss ? 1 : 0;
+      this._shadow.decisions[i * 3] = DECISION_CODE[decisions.B0];
+      this._shadow.decisions[i * 3 + 1] = DECISION_CODE[decisions.B1];
+      this._shadow.decisions[i * 3 + 2] = DECISION_CODE[decisions.Predictor];
+      this._shadow.count++;
+    }
+
     const activeDecision = decisions[this._active];
     const cost = workCostFor(activeDecision);
     const baseMs = this._workload(this._frameIdx);
@@ -143,6 +183,28 @@ export class SequentialLoop {
     this._frameIdx++;
 
     return { dt, wasMiss, decisions, features };
+  }
+
+  /**
+   * Extract the shadow log as plain-Array payloads safe for JSON
+   * serialization / Puppeteer transfer. Returns null if shadow logging
+   * was not enabled. Decisions are returned as the raw Uint8 codes
+   * (0=full, 1=reduce, 2=degrade); use SequentialLoop.shadowDecisionName(code)
+   * to translate.
+   */
+  getShadowLog() {
+    if (!this._shadow) return null;
+    const n = this._shadow.count;
+    return {
+      count: n,
+      dt: Array.from(this._shadow.dt.subarray(0, n)),
+      miss: Array.from(this._shadow.miss.subarray(0, n)),
+      decisions: Array.from(this._shadow.decisions.subarray(0, n * 3)),
+    };
+  }
+
+  static shadowDecisionName(code) {
+    return DECISION_NAMES[code];
   }
 
   /**

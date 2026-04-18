@@ -3,6 +3,7 @@ dist/
 benchmark/dist/
 results.json
 shadow.json
+shadow.jsonl
 .vite/
 .vitest-cache/
 coverage/

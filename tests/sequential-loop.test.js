@@ -334,3 +334,101 @@ describe("SequentialLoop — determinism", () => {
     }
   });
 });
+
+describe("SequentialLoop — shadow log", () => {
+  it("returns null when shadowLog is not enabled", () => {
+    const clock = makeFakeClock();
+    const loop = new SequentialLoop({
+      buildState: makeMockFactory(),
+      workload: () => 5,
+      busyWait: clock.busyWait,
+      now: clock.now,
+      initialActive: "B0",
+    });
+    loop.step();
+    expect(loop.getShadowLog()).toBeNull();
+  });
+
+  it("captures per-frame dt, miss flag, and 3 decisions as Uint8 codes", () => {
+    const clock = makeFakeClock();
+    const loop = new SequentialLoop({
+      buildState: makeMockFactory({
+        decisions: { B0: "full", B1: "reduce", Predictor: "degrade" },
+      }),
+      workload: () => 20, // budget-exceeding so second+ frame is miss
+      busyWait: clock.busyWait,
+      now: clock.now,
+      initialActive: "B0",
+      shadowLog: { maxFrames: 100 },
+    });
+    for (let i = 0; i < 5; i++) loop.step();
+    const log = loop.getShadowLog();
+    expect(log.count).toBe(5);
+    // First frame dt = 0 (no previous), not miss.
+    expect(log.dt[0]).toBe(0);
+    expect(log.miss[0]).toBe(0);
+    // Second frame dt = 20 (from first busyWait), miss (20 > 17.67).
+    expect(log.dt[1]).toBeCloseTo(20, 5);
+    expect(log.miss[1]).toBe(1);
+    // Decision codes per frame: B0=0, B1=1, Predictor=2.
+    for (let i = 0; i < 5; i++) {
+      expect(log.decisions[i * 3]).toBe(0);
+      expect(log.decisions[i * 3 + 1]).toBe(1);
+      expect(log.decisions[i * 3 + 2]).toBe(2);
+    }
+  });
+
+  it("stops logging at maxFrames without overwriting earlier entries", () => {
+    const clock = makeFakeClock();
+    const loop = new SequentialLoop({
+      buildState: makeMockFactory(),
+      workload: () => 5,
+      busyWait: clock.busyWait,
+      now: clock.now,
+      initialActive: "B0",
+      shadowLog: { maxFrames: 3 },
+    });
+    for (let i = 0; i < 10; i++) loop.step();
+    const log = loop.getShadowLog();
+    expect(log.count).toBe(3);
+    expect(log.dt.length).toBe(3);
+  });
+
+  it("reset() clears the shadow log back to count=0", () => {
+    const clock = makeFakeClock();
+    const loop = new SequentialLoop({
+      buildState: makeMockFactory(),
+      workload: () => 5,
+      busyWait: clock.busyWait,
+      now: clock.now,
+      initialActive: "B0",
+      shadowLog: { maxFrames: 100 },
+    });
+    for (let i = 0; i < 5; i++) loop.step();
+    expect(loop.getShadowLog().count).toBe(5);
+    loop.reset();
+    expect(loop.getShadowLog().count).toBe(0);
+  });
+
+  it("shadowDecisionName translates codes back to strings", () => {
+    expect(SequentialLoop.shadowDecisionName(0)).toBe("full");
+    expect(SequentialLoop.shadowDecisionName(1)).toBe("reduce");
+    expect(SequentialLoop.shadowDecisionName(2)).toBe("degrade");
+  });
+
+  it("rejects non-positive maxFrames", () => {
+    const clock = makeFakeClock();
+    const make = (max) =>
+      new SequentialLoop({
+        buildState: makeMockFactory(),
+        workload: () => 5,
+        busyWait: clock.busyWait,
+        now: clock.now,
+        initialActive: "B0",
+        shadowLog: { maxFrames: max },
+      });
+    expect(() => make(0)).toThrow();
+    expect(() => make(-1)).toThrow();
+    expect(() => make(1.5)).toThrow();
+  });
+});

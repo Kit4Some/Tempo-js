@@ -154,7 +154,12 @@ function colorFor(activeName) {
 
 let state = null;
 
-function init(seed = 42, workloadName = "constant", activeName = "Predictor") {
+function init(
+  seed = 42,
+  workloadName = "constant",
+  activeName = "Predictor",
+  opts = {},
+) {
   stop();
   const loop = new SequentialLoop({
     buildState: makeFactory(seed),
@@ -162,6 +167,9 @@ function init(seed = 42, workloadName = "constant", activeName = "Predictor") {
     busyWait: realBusyWait,
     now: () => performance.now(),
     initialActive: activeName,
+    shadowLog: opts.shadowMaxFrames
+      ? { maxFrames: opts.shadowMaxFrames }
+      : null,
   });
   const chartCanvas = document.getElementById("chart-canvas");
   const heatmapCanvas = document.getElementById("heatmap-canvas");

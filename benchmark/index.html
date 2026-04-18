@@ -3,41 +3,100 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Tempo — benchmark (Phase 2 init)</title>
+    <title>Tempo — live benchmark</title>
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <h1>Tempo — Phase 2 benchmark harness</h1>
-    <div class="controls">
-      <div class="group">
-        <label>Workload:</label>
-        <button data-workload="constant">constant</button>
-        <button data-workload="sawtooth">sawtooth</button>
-        <button data-workload="burst">burst</button>
-        <button data-workload="scroll">scroll</button>
+    <header>
+      <h1>Tempo</h1>
+      <div class="controls">
+        <label>
+          Workload
+          <select id="workload-select">
+            <option value="constant" selected>constant</option>
+            <option value="sawtooth">sawtooth</option>
+            <option value="burst">burst</option>
+            <option value="scroll">scroll-correlated</option>
+          </select>
+        </label>
+        <label>
+          Active
+          <select id="scheduler-select">
+            <option value="B0">B0 — always full</option>
+            <option value="B1">B1 — EMA threshold</option>
+            <option value="Predictor" selected>Predictor — 353-param MLP</option>
+          </select>
+        </label>
+        <button id="run-btn" type="button">Run</button>
+        <button id="stop-btn" type="button" disabled>Stop</button>
+        <button id="reset-btn" type="button">Reset</button>
+        <button id="run-all-btn" type="button" class="run-all">
+          Run all 3 <span class="hint">~3 min</span>
+        </button>
       </div>
-      <div class="group">
-        <label for="scheduler">Scheduler:</label>
-        <select id="scheduler">
-          <option value="B0">B0 (always full)</option>
-          <option value="B1" selected>B1 (EMA threshold)</option>
-        </select>
+      <div id="unsupported-browser" class="warning" hidden>
+        This benchmark requires <strong>Chrome 47+</strong>,
+        <strong>Firefox 55+</strong>, or <strong>Edge 79+</strong>.
+        Safari is not supported (missing
+        <code>requestIdleCallback</code> API).
       </div>
-      <div class="group">
-        <button id="start">Start</button>
-        <button id="stop">Stop</button>
-      </div>
-    </div>
-    <div class="status">
-      <div>Current workload: <span id="current-workload">—</span></div>
-      <div>Latest decision: <span id="decision">—</span></div>
-      <div>Frames recorded: <span id="frames">0</span></div>
-      <div class="hint">
-        Open DevTools → Console for per-second
-        <code>{ scheduler, workload, jankRate, p95 }</code>
-        output.
-      </div>
-    </div>
+    </header>
+
+    <main>
+      <section class="chart-area">
+        <canvas
+          id="chart-canvas"
+          width="800"
+          height="420"
+          aria-label="Active scheduler frame-time chart"
+        ></canvas>
+      </section>
+      <aside class="side">
+        <section class="stats-area">
+          <table id="stats-table" aria-label="Scheduler statistics">
+            <thead>
+              <tr>
+                <th scope="col">Scheduler</th>
+                <th scope="col">Jank (All)</th>
+                <th scope="col">Jank (300f)</th>
+                <th scope="col">P95 (All)</th>
+                <th scope="col">P95 (300f)</th>
+                <th scope="col">Mean</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr data-scheduler="B0">
+                <th scope="row">B0</th>
+                <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>
+              </tr>
+              <tr data-scheduler="B1">
+                <th scope="row">B1</th>
+                <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>
+              </tr>
+              <tr data-scheduler="Predictor" class="active">
+                <th scope="row">Predictor</th>
+                <td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+        <section class="heatmap-area">
+          <canvas
+            id="heatmap-canvas"
+            width="600"
+            height="320"
+            aria-label="Predictor weights heatmap"
+          ></canvas>
+          <div class="heatmap-legend">
+            <span>W1 (50%)</span>
+            <span>W2 (30%)</span>
+            <span>W3 (10%)</span>
+            <span>biases (10%)</span>
+          </div>
+        </section>
+      </aside>
+    </main>
+
     <script type="module" src="./app.js"></script>
   </body>
 </html>

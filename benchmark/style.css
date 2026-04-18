@@ -1,80 +1,187 @@
-/* Phase 2: minimal styling. Phase 4 rebuilds the page properly. */
+/* Phase 4 skeleton. Rendering details arrive in commit 5. */
 
+:root {
+  --bg: #1a1a1a;
+  --bg-elev: #222;
+  --bg-table: #202020;
+  --border: #333;
+  --text: #e0e0e0;
+  --text-dim: #888;
+  --text-muted: #666;
+  --accent-b0: #888;
+  --accent-b1: #ff9b3d;
+  --accent-pred: #4dd0e1;
+  --warn: #ffb74d;
+  --disabled: 0.4;
+  --mono:
+    ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
 body {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  background: #111;
-  color: #eee;
-  padding: 1rem;
   margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+header {
+  border-bottom: 1px solid var(--border);
+  padding: 0.8rem 1rem;
 }
 
 h1 {
+  margin: 0 0 0.6rem;
   font-size: 1.1rem;
   font-weight: 600;
-  margin: 0 0 1rem;
-  color: #0fa;
+  letter-spacing: 0.02em;
+  color: var(--accent-pred);
 }
 
 .controls {
   display: flex;
-  gap: 1.5rem;
-  flex-wrap: wrap;
-  margin-bottom: 1rem;
-  padding: 0.75rem;
-  background: #181818;
-  border: 1px solid #333;
-}
-
-.group {
-  display: flex;
-  gap: 0.5rem;
+  gap: 0.75rem;
   align-items: center;
+  flex-wrap: wrap;
 }
 
-label {
-  color: #888;
+.controls label {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+  color: var(--text-dim);
 }
 
-button,
-select {
-  background: #222;
-  color: #eee;
-  border: 1px solid #444;
-  padding: 0.3rem 0.7rem;
+select,
+button {
+  background: var(--bg-elev);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 0.3rem 0.65rem;
   font: inherit;
   cursor: pointer;
+  border-radius: 2px;
 }
 
-button:hover,
-select:hover {
-  background: #2a2a2a;
+select:hover,
+button:hover:not(:disabled) {
+  border-color: #555;
 }
 
-button[data-active="true"] {
-  background: #064;
-  border-color: #0a6;
-  color: #0fa;
+button:disabled {
+  opacity: var(--disabled);
+  cursor: not-allowed;
 }
 
-.status {
+button.run-all {
+  margin-left: auto;
+  border-color: #555;
+  color: var(--text);
+}
+
+button.run-all .hint {
+  color: var(--text-muted);
+  font-size: 0.85em;
+  margin-left: 0.35rem;
+}
+
+.warning {
+  margin-top: 0.6rem;
+  padding: 0.6rem 0.8rem;
+  background: rgba(255, 183, 77, 0.08);
+  border: 1px solid var(--warn);
+  color: var(--warn);
+  border-radius: 2px;
+}
+
+.warning code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 0.05rem 0.3rem;
+  border-radius: 2px;
+}
+
+main {
+  display: grid;
+  grid-template-columns: 55% 45%;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem 1rem;
+  min-height: calc(100vh - 120px);
+}
+
+.chart-area,
+.stats-area,
+.heatmap-area {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  padding: 0.6rem;
+  border-radius: 2px;
+}
+
+.chart-area canvas,
+.heatmap-area canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.side {
+  display: grid;
+  grid-template-rows: 50% 50%;
+  gap: 0.75rem;
+  min-height: 0;
+}
+
+#stats-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+#stats-table th,
+#stats-table td {
+  padding: 0.4rem 0.6rem;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+}
+
+#stats-table th[scope="col"] {
+  color: var(--text-dim);
+  font-weight: 500;
+  background: var(--bg-table);
+}
+
+#stats-table th[scope="row"] {
+  text-align: left;
+  font-weight: 600;
+}
+
+#stats-table tr[data-scheduler="B0"] th[scope="row"] {
+  color: var(--accent-b0);
+}
+#stats-table tr[data-scheduler="B1"] th[scope="row"] {
+  color: var(--accent-b1);
+}
+#stats-table tr[data-scheduler="Predictor"] th[scope="row"] {
+  color: var(--accent-pred);
+}
+
+#stats-table tr.active {
+  background: rgba(77, 208, 225, 0.06);
+}
+
+.heatmap-legend {
   display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  line-height: 1.5;
-}
-
-.status span {
-  color: #0fa;
-}
-
-.hint {
-  color: #777;
-  font-size: 0.9rem;
-  margin-top: 0.5rem;
-}
-
-code {
-  background: #222;
-  padding: 0.1rem 0.3rem;
-  color: #fa0;
+  gap: 0.75rem;
+  margin-top: 0.4rem;
+  color: var(--text-muted);
+  font-size: 0.85em;
 }

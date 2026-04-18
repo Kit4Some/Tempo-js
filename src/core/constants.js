@@ -92,6 +92,24 @@ export const MLP_OUTPUT_DIM = 1;
 // sum is 353); we pin PARAM_COUNT here and align the rest of the codebase.
 export const PARAM_COUNT = 353;
 
+// Flat Float32Array parameter layout (row-major). Offsets derived from the
+// MLP_*_DIM constants so any architecture change flows through automatically.
+// Exposed at module scope (rather than kept local to predictor.js) so Phase 4
+// LayeredHeatmap can slice the 353-param vector by layer without duplicating
+// the layout math — a single source of truth for "where does W2 live".
+//   W1: [0,   192)   size MLP_INPUT_DIM * MLP_HIDDEN_1 = 192
+//   b1: [192, 208)   size MLP_HIDDEN_1                 = 16
+//   W2: [208, 336)   size MLP_HIDDEN_1 * MLP_HIDDEN_2  = 128
+//   b2: [336, 344)   size MLP_HIDDEN_2                 = 8
+//   W3: [344, 352)   size MLP_HIDDEN_2 * MLP_OUTPUT_DIM = 8
+//   b3: [352, 353)   size MLP_OUTPUT_DIM               = 1
+export const W1_OFFSET = 0;
+export const B1_OFFSET = W1_OFFSET + MLP_INPUT_DIM * MLP_HIDDEN_1;
+export const W2_OFFSET = B1_OFFSET + MLP_HIDDEN_1;
+export const B2_OFFSET = W2_OFFSET + MLP_HIDDEN_1 * MLP_HIDDEN_2;
+export const W3_OFFSET = B2_OFFSET + MLP_HIDDEN_2;
+export const B3_OFFSET = W3_OFFSET + MLP_HIDDEN_2 * MLP_OUTPUT_DIM;
+
 // BCE loss clamp epsilon. p_miss is clamped to [PRED_LOSS_EPS, 1-PRED_LOSS_EPS]
 // in both Predictor.loss() and Predictor.backward()'s dL/dz3 computation to
 // keep log() finite and to keep the two computations using the same value of

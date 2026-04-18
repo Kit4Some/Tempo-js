@@ -16,20 +16,18 @@
 // Phase 3 Parts 2 and 3.
 
 import {
+  B1_OFFSET,
+  B2_OFFSET,
+  B3_OFFSET,
   MLP_HIDDEN_1,
   MLP_HIDDEN_2,
   MLP_INPUT_DIM,
-  MLP_OUTPUT_DIM,
   PARAM_COUNT,
   PRED_LOSS_EPS,
+  W1_OFFSET,
+  W2_OFFSET,
+  W3_OFFSET,
 } from "./constants.js";
-
-const W1_OFFSET = 0;
-const B1_OFFSET = W1_OFFSET + MLP_HIDDEN_1 * MLP_INPUT_DIM;
-const W2_OFFSET = B1_OFFSET + MLP_HIDDEN_1;
-const B2_OFFSET = W2_OFFSET + MLP_HIDDEN_2 * MLP_HIDDEN_1;
-const W3_OFFSET = B2_OFFSET + MLP_HIDDEN_2;
-const B3_OFFSET = W3_OFFSET + MLP_OUTPUT_DIM * MLP_HIDDEN_2;
 
 function gaussianSample(rng) {
   // Box-Muller. Map (0, 1] so log() is never applied to 0.

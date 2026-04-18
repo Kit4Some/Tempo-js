@@ -1,0 +1,37 @@
+{
+  "timestamp": "2026-04-18T12:22:02.077Z",
+  "seed": 42,
+  "workload": "constant",
+  "active": "B0",
+  "run_ms": 60000,
+  "chrome_flags": [
+    "--disable-background-timer-throttling",
+    "--disable-renderer-backgrounding",
+    "--disable-backgrounding-occluded-windows"
+  ],
+  "stats": {
+    "all": {
+      "jankRate": 0,
+      "p95": 5.099999904632568,
+      "p99": 5.199999809265137,
+      "meanDt": 5.029687472153455,
+      "frameCount": 1024
+    },
+    "recent": {
+      "jankRate": 0,
+      "p95": 5.099999904632568,
+      "p99": 5.199999809265137,
+      "meanDt": 5.031999971071879,
+      "frameCount": 300
+    }
+  },
+  "floor_percent": 0,
+  "live_floor_percent": 10,
+  "gate": "PROCEED",
+  "gate_reason": "Headless floor 0.00% < 3%. Go/No-Go threshold becomes relatively more discriminating.",
+  "console_errors": [
+    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ],
+  "node_version": "v22.18.0",
+  "platform": "win32 x64"
+}

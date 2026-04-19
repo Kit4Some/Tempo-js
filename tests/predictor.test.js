@@ -143,6 +143,68 @@ describe("Predictor — He initialization", () => {
   });
 });
 
+describe("Predictor.loadPretrained", () => {
+  it("replaces params with the provided Float32Array, elementwise", () => {
+    const p = new Predictor({ rng: mulberry32(1) });
+    const weights = new Float32Array(PARAM_COUNT);
+    for (let i = 0; i < PARAM_COUNT; i++) weights[i] = (i - 176) / 100;
+    p.loadPretrained(weights);
+    for (let i = 0; i < PARAM_COUNT; i++) {
+      expect(p.params[i]).toBe(weights[i]);
+    }
+  });
+
+  it("copies values (later mutation to input does not leak into params)", () => {
+    const p = new Predictor();
+    const weights = new Float32Array(PARAM_COUNT);
+    weights[0] = 0.5;
+    p.loadPretrained(weights);
+    weights[0] = 999;
+    expect(p.params[0]).toBe(0.5);
+  });
+
+  it("throws when weights length is not PARAM_COUNT", () => {
+    const p = new Predictor();
+    expect(() => p.loadPretrained(new Float32Array(352))).toThrow();
+    expect(() => p.loadPretrained(new Float32Array(354))).toThrow();
+    expect(() => p.loadPretrained(new Float32Array(0))).toThrow();
+  });
+
+  it("forward() after load reflects the new weights", () => {
+    // All-zero weights + b3=1 → p_miss = sigmoid(1) regardless of input.
+    const p = new Predictor({ rng: mulberry32(1) });
+    const weights = new Float32Array(PARAM_COUNT);
+    weights[352] = 1;
+    p.loadPretrained(weights);
+    const x = new Float32Array(MLP_INPUT_DIM);
+    for (let i = 0; i < x.length; i++) x[i] = 0.3;
+    const expected = 1 / (1 + Math.exp(-1));
+    expect(p.forward(x).p_miss).toBeCloseTo(expected, 6);
+  });
+
+  it("no-ops when weights is null (PRETRAINED_WEIGHTS placeholder bootstrap)", () => {
+    // pretrained.js exports null before Phase 5 Part 2 fills it in, so
+    // loadPretrained(null) must be a safe no-op — callers wrap init this way.
+    const p = new Predictor({ rng: mulberry32(1) });
+    const before = new Float32Array(p.params);
+    p.loadPretrained(null);
+    for (let i = 0; i < PARAM_COUNT; i++) {
+      expect(p.params[i]).toBe(before[i]);
+    }
+  });
+
+  it("accepts a plain number[] as well as Float32Array", () => {
+    // Inline PRETRAINED_WEIGHTS is authored as an array literal; we accept
+    // either shape so the loader does not force a pre-allocation in the
+    // consumer.
+    const p = new Predictor();
+    const arr = new Array(PARAM_COUNT).fill(0);
+    arr[352] = 0.25;
+    p.loadPretrained(arr);
+    expect(p.params[352]).toBeCloseTo(0.25, 6);
+  });
+});
+
 describe("Predictor.loss — BCE with symmetric clamp", () => {
   it("at p_miss = 0.5 (zero params), loss = -log(0.5) regardless of target", () => {
     const p = new Predictor();

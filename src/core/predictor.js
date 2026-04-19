@@ -75,6 +75,29 @@ export class Predictor {
     this._initHe();
   }
 
+  /**
+   * Replace the Predictor's parameters in-place with pretrained weights.
+   * The hidden-activation and gradient buffers are untouched — forward() and
+   * backward() keep their zero-alloc contract across the load.
+   *
+   * @param {Float32Array | number[] | null} weights — length must be
+   *   PARAM_COUNT. `null` is a no-op so callers can pass `PRETRAINED_WEIGHTS`
+   *   directly without a null-check (the placeholder exports null until Phase
+   *   5 Part 2 fills it in).
+   */
+  loadPretrained(weights) {
+    if (weights == null) return;
+    if (weights.length !== PARAM_COUNT) {
+      throw new Error(
+        `Predictor.loadPretrained: expected length ${PARAM_COUNT}, got ${weights.length}`,
+      );
+    }
+    // Copy rather than reassign: params is an exported reference (e.g.,
+    // PredictorScheduler holds it for readouts), and the caller may mutate
+    // or discard their own buffer after the call.
+    this.params.set(weights);
+  }
+
   _initHe() {
     const p = this.params;
     const rng = this._rng;

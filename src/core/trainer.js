@@ -81,6 +81,22 @@ export class OnlineTrainer {
     this._lossWindow = new Float32Array(LOSS_WINDOW_SIZE);
     this._lossWriteIdx = 0;
     this._lossCount = 0;
+
+    // Enabled by default. setEnabled(false) freezes learning: trainStep()
+    // becomes a no-op returning null, while push() still appends (so a
+    // frozen-evaluation path can keep the ring buffer warm for inspection).
+    // Used by Phase 5 Part 2's pretrained+frozen benchmark condition.
+    this._enabled = true;
+  }
+
+  /**
+   * Toggle training on/off.
+   *  - false: trainStep() returns null without touching params/velocity.
+   *    push() still accepts samples (frozen-eval can keep buffer semantics).
+   *  - true: trainStep() resumes normally.
+   */
+  setEnabled(enabled) {
+    this._enabled = !!enabled;
   }
 
   /**
@@ -111,6 +127,7 @@ export class OnlineTrainer {
    * @returns {{ loss: number, gradNorm: number } | null}
    */
   trainStep(batchSize = BATCH_SIZE) {
+    if (!this._enabled) return null;
     const available = Math.min(this._count, this._bufferSize);
     if (available === 0) return null;
     const B = Math.min(batchSize, available);

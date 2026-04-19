@@ -80,6 +80,54 @@ describe("OnlineTrainer — buffer + shape", () => {
   });
 });
 
+describe("OnlineTrainer.setEnabled", () => {
+  it("defaults to enabled (trainStep returns non-null after push)", () => {
+    const p = new Predictor({ rng: mulberry32(1) });
+    const t = new OnlineTrainer(p);
+    t.push(featureVec(0.5), 1);
+    expect(t.trainStep(1)).not.toBeNull();
+  });
+
+  it("push still stores samples when disabled (frozen eval still needs buffer semantics)", () => {
+    const p = new Predictor({ rng: mulberry32(1) });
+    const t = new OnlineTrainer(p);
+    t.setEnabled(false);
+    t.push(featureVec(0.5), 1);
+    t.push(featureVec(0.6), 0);
+    expect(t.bufferCount()).toBe(2);
+  });
+
+  it("trainStep returns null when disabled, regardless of buffer contents", () => {
+    const p = new Predictor({ rng: mulberry32(1) });
+    const t = new OnlineTrainer(p);
+    for (let i = 0; i < 16; i++) t.push(featureVec(0.5), 1);
+    t.setEnabled(false);
+    expect(t.trainStep(16)).toBeNull();
+  });
+
+  it("params are frozen across trainStep calls when disabled", () => {
+    const p = new Predictor({ rng: mulberry32(1) });
+    const t = new OnlineTrainer(p);
+    for (let i = 0; i < 16; i++) t.push(featureVec(0.9), 1);
+    t.setEnabled(false);
+    const before = new Float32Array(p.params);
+    for (let i = 0; i < 10; i++) t.trainStep(16);
+    for (let i = 0; i < PARAM_COUNT; i++) {
+      expect(p.params[i]).toBe(before[i]);
+    }
+  });
+
+  it("re-enabling restores training (trainStep returns non-null again)", () => {
+    const p = new Predictor({ rng: mulberry32(1) });
+    const t = new OnlineTrainer(p);
+    t.push(featureVec(0.5), 1);
+    t.setEnabled(false);
+    expect(t.trainStep(1)).toBeNull();
+    t.setEnabled(true);
+    expect(t.trainStep(1)).not.toBeNull();
+  });
+});
+
 describe("OnlineTrainer — convergence on a synthetic classifier", () => {
   it(
     "converges to loss < 0.1 on features[0] > 0.5 in 10,000 steps (seed=42)",

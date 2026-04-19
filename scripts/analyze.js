@@ -49,6 +49,7 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..");
 const IN_RESULTS = resolve(REPO_ROOT, "docs/PHASE5_PART1_RESULTS.jsonl");
 const OUT_RESULTS_MD = resolve(REPO_ROOT, "docs/RESULTS.md");
+const COMPARE_OUT = resolve(REPO_ROOT, "docs/PHASE5_PART2_COMPARE.md");
 
 const WORKLOADS = ["constant", "sawtooth", "burst", "scroll"];
 const SCHEDULERS = ["B0", "B1", "Predictor"];
@@ -62,7 +63,7 @@ const BOOT_SEED = 20260419;
 
 // --- Input parsing --------------------------------------------------------
 
-function loadResults(path) {
+export function loadResults(path) {
   const data = readFileSync(path, "utf-8");
   const records = [];
   for (const line of data.split("\n")) {
@@ -71,6 +72,85 @@ function loadResults(path) {
     records.push(JSON.parse(trimmed));
   }
   return records;
+}
+
+/**
+ * Normalize a set of run records so downstream code can key on
+ * `condition` uniformly:
+ *   - Part 1 records have no condition field → default to "scratch".
+ *   - Part 2 records carry condition explicitly.
+ * Also drops non-ok records (status !== "ok" is a run-level failure).
+ *
+ * Exported for tests.
+ */
+export function normalizeRecords(records) {
+  const out = [];
+  for (const r of records) {
+    if (r.status && r.status !== "ok") continue;
+    out.push({
+      ...r,
+      condition: r.condition ?? "scratch",
+      pretrained: r.pretrained ?? false,
+      freeze: r.freeze ?? false,
+    });
+  }
+  return out;
+}
+
+/**
+ * Filter a normalized record array to the rows matching the selector.
+ * selector = {workload, active, condition}. Any omitted field is unconstrained.
+ */
+export function selectCell(records, selector) {
+  return records.filter((r) => {
+    if (selector.workload != null && r.workload !== selector.workload) return false;
+    if (selector.active != null && r.active !== selector.active) return false;
+    if (selector.condition != null && r.condition !== selector.condition) return false;
+    return true;
+  });
+}
+
+/**
+ * Run the Part 2 comparison statistic on jankRate for two cells.
+ * Exported for tests.
+ *
+ * @returns {{
+ *   n1, n2, meanA, meanB, ciA, ciB, U, p, d,
+ *   insufficient, verdict: "GO (A<B)" | "GO (A>B)" | "NO-GO" | "INSUFFICIENT"
+ * }}
+ */
+export function compareCells(cellA, cellB, rng) {
+  const a = cellA.map((r) => r.jankRate);
+  const b = cellB.map((r) => r.jankRate);
+  if (a.length < 2 || b.length < 2) {
+    return {
+      n1: a.length,
+      n2: b.length,
+      insufficient: true,
+      verdict: "INSUFFICIENT",
+    };
+  }
+  const mw = mannWhitneyU(a, b);
+  const d = cohensD(a, b);
+  const meanA = mean(a);
+  const meanB = mean(b);
+  const ciA = bootstrapMeanCI(a, { B: BOOT_B, level: 0.95, rng });
+  const ciB = bootstrapMeanCI(b, { B: BOOT_B, level: 0.95, rng });
+  const sig = mw.p < GO_P && Math.abs(d) >= GO_D;
+  const verdict = sig ? (d < 0 ? "GO (A<B)" : "GO (A>B)") : "NO-GO";
+  return {
+    n1: a.length,
+    n2: b.length,
+    meanA,
+    meanB,
+    ciA,
+    ciB,
+    U: mw.U,
+    p: mw.p,
+    d,
+    insufficient: false,
+    verdict,
+  };
 }
 
 function groupByCell(records) {
@@ -373,9 +453,135 @@ function renderVerdictSummary(perWorkload, failureRate) {
   return lines.join("\n");
 }
 
+// --- Part 2 comparison mode -----------------------------------------------
+
+/**
+ * Render one comparison section for a (title, A-selector, B-selector) triple.
+ * Emits a per-workload Markdown table with jankRate means, 95% bootstrap
+ * CIs, Mann-Whitney U p, Cohen's d, and a GO / NO-GO verdict per the
+ * standard gate (p < 0.05 AND |d| ≥ 0.5).
+ */
+function renderCompareSection(title, interpretation, records, selA, selB, rng) {
+  const lines = [`## ${title}`, "", interpretation, ""];
+  lines.push(
+    "| Workload | n(A) | n(B) | A jank [95% CI] | B jank [95% CI] | U | p | d | Verdict |",
+  );
+  lines.push("|---|---:|---:|---|---|---:|---:|---:|---|");
+  for (const wl of WORKLOADS) {
+    const a = selectCell(records, { workload: wl, ...selA });
+    const b = selectCell(records, { workload: wl, ...selB });
+    const cmp = compareCells(a, b, rng);
+    if (cmp.insufficient) {
+      lines.push(
+        `| ${wl} | ${cmp.n1} | ${cmp.n2} | — | — | — | — | — | INSUFFICIENT |`,
+      );
+      continue;
+    }
+    lines.push(
+      `| ${wl} | ${cmp.n1} | ${cmp.n2} | ${pct(cmp.meanA)} ${fmtCI(cmp.ciA, pct)} | ${pct(cmp.meanB)} ${fmtCI(cmp.ciB, pct)} | ${cmp.U} | ${sci(cmp.p)} | ${f4(cmp.d)} | ${cmp.verdict} |`,
+    );
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+/**
+ * Full Part 2 comparison report. Takes two JSONL paths (Part 1 and Part 2)
+ * and produces the three pre-registered tables:
+ *   (a) Scratch vs Pretrained+Online   — isolates the init-quality effect.
+ *   (b) Pretrained+Online vs +Frozen   — isolates online learning's marginal value.
+ *   (c) B1 vs Pretrained+Frozen        — hand-crafted prior vs data-learned prior.
+ *
+ * B1 data pool for (c): Part 1 B1 runs + Part 2 B1 drift-check runs. If
+ * drift detection flags a shift, the Part 2 drift runs alone are used;
+ * decision is left to human review per PHASE5_NOTES.md § Part 2.
+ */
+export function runCompareMode({ part1Path, part2Path, outPath }) {
+  const p1 = normalizeRecords(loadResults(part1Path));
+  const p2 = normalizeRecords(loadResults(part2Path));
+  const all = [...p1, ...p2];
+  const rng = mulberry32(BOOT_SEED);
+
+  const sectionA = renderCompareSection(
+    "(a) Scratch (Part 1) vs Pretrained + Online (Part 2)",
+    "_Same online learning, different starting point. Isolates the **init-quality** contribution._",
+    all,
+    { active: "Predictor", condition: "scratch" },
+    { active: "Predictor", condition: "pretrained+online" },
+    rng,
+  );
+  const sectionB = renderCompareSection(
+    "(b) Pretrained + Online vs Pretrained + Frozen (Part 2)",
+    "_Same starting point, online learning on vs off. Isolates the **online-learning marginal value**._",
+    all,
+    { active: "Predictor", condition: "pretrained+online" },
+    { active: "Predictor", condition: "pretrained+frozen" },
+    rng,
+  );
+  const sectionC = renderCompareSection(
+    "(c) B1 (hand-crafted frozen prior) vs Pretrained + Frozen (data-learned frozen prior)",
+    "_The blog-post headline match. Both are frozen priors — one designed by a human on EMA thresholds, one learned by SGD from 334k frames._",
+    all,
+    { active: "B1", condition: "scratch" },
+    { active: "Predictor", condition: "pretrained+frozen" },
+    rng,
+  );
+
+  const header = [
+    "# Phase 5 Part 2 — Pretrained vs Scratch Comparison",
+    "",
+    `_Generated: ${new Date().toISOString()}_`,
+    "",
+    `Inputs: \`${part1Path}\` + \`${part2Path}\`.`,
+    "",
+    `Gate (pinned): \`p < ${GO_P}\` AND \`|d| ≥ ${GO_D}\` on jankRate per workload.`,
+    `Verdict column: \`A<B\` / \`A>B\` indicates direction of the effect (not a value judgement — interpret per section).`,
+    "",
+  ].join("\n");
+
+  const out = [header, sectionA, sectionB, sectionC].join("\n");
+  writeFileSync(outPath, out);
+  process.stdout.write(
+    `Part 2 comparison written to ${outPath}\n` +
+      `  (a) sections rendered: 3\n` +
+      `  Part 1 ok records: ${p1.length}, Part 2 ok records: ${p2.length}\n`,
+  );
+}
+
+// --- CLI ------------------------------------------------------------------
+
+export function parseAnalyzeArgs(argv) {
+  const args = { compare: null, out: null };
+  for (const a of argv.slice(2)) {
+    if (a.startsWith("--compare=")) {
+      const v = a.split("=")[1];
+      const paths = v.split(",");
+      if (paths.length !== 2) {
+        throw new Error(
+          `--compare expects two comma-separated paths, got ${paths.length}`,
+        );
+      }
+      args.compare = { part1: paths[0], part2: paths[1] };
+    } else if (a.startsWith("--out=")) {
+      args.out = a.split("=")[1];
+    } else {
+      throw new Error(`unknown argument: ${a}`);
+    }
+  }
+  return args;
+}
+
 // --- Main -----------------------------------------------------------------
 
 function main() {
+  const args = parseAnalyzeArgs(process.argv);
+  if (args.compare) {
+    const part1Path = resolve(REPO_ROOT, args.compare.part1);
+    const part2Path = resolve(REPO_ROOT, args.compare.part2);
+    const outPath = args.out ? resolve(REPO_ROOT, args.out) : COMPARE_OUT;
+    runCompareMode({ part1Path, part2Path, outPath });
+    return;
+  }
   const all = loadResults(IN_RESULTS);
   const ok = all.filter((r) => r.status === "ok");
   const grouped = groupByCell(ok);
@@ -415,4 +621,11 @@ Analysis complete.
 `);
 }
 
-main();
+// Only execute main() when invoked as a script. Tests import
+// loadResults / normalizeRecords / compareCells / runCompareMode and must
+// not trigger a full analysis on import.
+const invokedAsScript =
+  process.argv[1] && process.argv[1].endsWith("analyze.js");
+if (invokedAsScript) {
+  main();
+}

@@ -26,8 +26,9 @@ import {
   B1_EmaThreshold,
   PredictorScheduler,
 } from "../src/core/schedulers.js";
+import { PRETRAINED_WEIGHTS } from "../src/harness/pretrained.js";
 import { LineChart, LayeredHeatmap, makeDefaultLayers } from "./charts.js";
-import { buildStatsRows, runSequence } from "./live-controls.js";
+import { buildStatsRows, runSequence, parseInitOpts } from "./live-controls.js";
 import {
   LIVE_COOLDOWN_MS,
   LIVE_RUN_MS,
@@ -119,11 +120,17 @@ function workloadCostFor(name) {
   }
 }
 
-function makeFactory(seed) {
+function makeFactory(seed, { pretrained = false, freeze = false } = {}) {
   return () => {
     const rng = mulberry32(seed);
     const predictor = new Predictor({ rng });
+    // Apply Phase 5 Part 2 init condition INSIDE the factory so each
+    // loop.reset() re-applies the same (pretrained, freeze) combo. Doing it
+    // at init()-call-site instead would leak the "I just reset" case: a
+    // fresh He-init Predictor with pretrained flag set but never loaded.
+    if (pretrained) predictor.loadPretrained(PRETRAINED_WEIGHTS);
     const trainer = new OnlineTrainer(predictor, { rng });
+    if (freeze) trainer.setEnabled(false);
     const extractor = new FeatureExtractor();
     return {
       schedulers: {
@@ -161,8 +168,10 @@ function init(
   opts = {},
 ) {
   stop();
+  const pretrained = !!opts.pretrained;
+  const freeze = !!opts.freeze;
   const loop = new SequentialLoop({
-    buildState: makeFactory(seed),
+    buildState: makeFactory(seed, { pretrained, freeze }),
     workload: workloadCostFor(workloadName),
     busyWait: realBusyWait,
     now: () => performance.now(),
@@ -187,6 +196,11 @@ function init(
     workloadName,
     activeName,
     seed,
+    // Persist the Part 2 init condition so reset() / workload-change /
+    // Run-all-3 all re-apply the same (pretrained, freeze) pair rather
+    // than silently dropping back to scratch+online on any reset path.
+    pretrained,
+    freeze,
     running: false,
     rafId: null,
     ricId: null,
@@ -254,7 +268,10 @@ function stop() {
 function reset() {
   if (!state) return;
   stop();
-  init(state.seed, state.workloadName, state.activeName);
+  init(state.seed, state.workloadName, state.activeName, {
+    pretrained: state.pretrained,
+    freeze: state.freeze,
+  });
   start();
 }
 
@@ -417,7 +434,10 @@ function wireControls() {
   workloadSelect?.addEventListener("change", (e) => {
     clearStatus();
     stop();
-    init(state.seed, e.target.value, state.activeName);
+    init(state.seed, e.target.value, state.activeName, {
+      pretrained: state.pretrained,
+      freeze: state.freeze,
+    });
     start();
   });
 
@@ -455,7 +475,13 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("workload-select")?.value ?? "constant";
   const activeName =
     document.getElementById("scheduler-select")?.value ?? "Predictor";
-  init(42, workloadName, activeName);
+  // Phase 5 Part 2 — URL-driven init condition:
+  //   ?init=pretrained&freeze=true|false
+  // Puppeteer builds the URL per-run in benchmark.js --mode=part2; live
+  // users can append the query by hand for exploration. Absent query =
+  // original Phase 4 behavior (scratch + online).
+  const { pretrained, freeze } = parseInitOpts(window.location.search);
+  init(42, workloadName, activeName, { pretrained, freeze });
   start();
   wireControls();
   window.tempo = { init, start, stop, reset, getState: () => state };

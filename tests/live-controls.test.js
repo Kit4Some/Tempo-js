@@ -4,6 +4,7 @@ import {
   formatMs,
   buildStatsRows,
   runSequence,
+  parseInitOpts,
 } from "../benchmark/live-controls.js";
 
 describe("formatJank", () => {
@@ -204,5 +205,65 @@ describe("runSequence", () => {
     ).rejects.toThrow(/abort/i);
     // B0 got reset/setActive; abort fires before B1 starts.
     expect(loop.setActive.mock.calls.length).toBeLessThan(3);
+  });
+});
+
+describe("parseInitOpts — URL query → init options", () => {
+  it("defaults to scratch + online when no params are present", () => {
+    expect(parseInitOpts("")).toEqual({ pretrained: false, freeze: false });
+    expect(parseInitOpts("?")).toEqual({ pretrained: false, freeze: false });
+  });
+
+  it("?init=pretrained sets pretrained:true (freeze defaults to false)", () => {
+    expect(parseInitOpts("?init=pretrained")).toEqual({
+      pretrained: true,
+      freeze: false,
+    });
+  });
+
+  it("?init=pretrained&freeze=true sets both", () => {
+    expect(parseInitOpts("?init=pretrained&freeze=true")).toEqual({
+      pretrained: true,
+      freeze: true,
+    });
+  });
+
+  it("?init=scratch explicitly selects scratch (same as default)", () => {
+    expect(parseInitOpts("?init=scratch")).toEqual({
+      pretrained: false,
+      freeze: false,
+    });
+  });
+
+  it("freeze=true without pretrained is a no-op combination (freeze still parsed)", () => {
+    // We accept the flag but it's semantically odd — scratch+frozen means
+    // "random init, never trained". Legal to request, useful for measuring
+    // the random-init baseline in ablations; the benchmark script does not
+    // schedule this cell but we don't gate it at the parser layer.
+    expect(parseInitOpts("?freeze=true")).toEqual({
+      pretrained: false,
+      freeze: true,
+    });
+  });
+
+  it("unknown init value falls back to scratch (strict whitelist)", () => {
+    expect(parseInitOpts("?init=foo")).toEqual({
+      pretrained: false,
+      freeze: false,
+    });
+  });
+
+  it("freeze only accepts literal 'true' (anything else is false)", () => {
+    expect(parseInitOpts("?freeze=True").freeze).toBe(false);
+    expect(parseInitOpts("?freeze=1").freeze).toBe(false);
+    expect(parseInitOpts("?freeze=yes").freeze).toBe(false);
+    expect(parseInitOpts("?freeze=true").freeze).toBe(true);
+  });
+
+  it("extra unknown params are ignored", () => {
+    expect(parseInitOpts("?init=pretrained&foo=bar&freeze=true")).toEqual({
+      pretrained: true,
+      freeze: true,
+    });
   });
 });

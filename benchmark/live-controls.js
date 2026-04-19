@@ -4,6 +4,32 @@
  * can be unit-tested without jsdom.
  */
 
+/**
+ * Parse the Phase 5 Part 2 init-mode URL query into a plain options object.
+ * Pure string → object — no `location` access — so it unit-tests without
+ * jsdom and reuses cleanly from Puppeteer (build a query, call the parser,
+ * hand off to init()).
+ *
+ * Accepted params (anything else is ignored):
+ *   ?init=scratch       → { pretrained: false, freeze: false }  (default)
+ *   ?init=pretrained    → { pretrained: true, freeze: false }
+ *   &freeze=true        → overrides freeze to true (literal 'true' only)
+ *
+ * Strict whitelist on `init`: an unknown value falls back to 'scratch' to
+ * keep surprises out of the benchmark. A permissive parser would let a
+ * typo silently run the wrong condition and taint the results.
+ *
+ * @param {string} search — typically location.search ("?k=v&..."), may be empty
+ * @returns {{pretrained: boolean, freeze: boolean}}
+ */
+export function parseInitOpts(search) {
+  const params = new URLSearchParams(search || "");
+  const initVal = params.get("init");
+  const pretrained = initVal === "pretrained";
+  const freeze = params.get("freeze") === "true";
+  return { pretrained, freeze };
+}
+
 export function formatJank(rate) {
   return `${(rate * 100).toFixed(1)}%`;
 }

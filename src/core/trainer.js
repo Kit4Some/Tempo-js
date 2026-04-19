@@ -91,12 +91,32 @@ export class OnlineTrainer {
 
   /**
    * Toggle training on/off.
-   *  - false: trainStep() returns null without touching params/velocity.
-   *    push() still accepts samples (frozen-eval can keep buffer semantics).
-   *  - true: trainStep() resumes normally.
+   *
+   * Semantics — "frozen" applies only to the LEARNING path, not to the
+   * Predictor itself:
+   *  - Predictor.forward()  is unaffected — PredictorScheduler.decide() keeps
+   *    calling it every frame to score p_miss.
+   *  - Predictor.backward() is unaffected — if anything upstream wants the
+   *    analytic gradient for diagnostics (gradcheck tests, weight heatmap
+   *    coloring), they can still call it; we do not mutate the Predictor.
+   *  - OnlineTrainer.push() still accepts samples so a frozen-eval run can
+   *    keep the ring buffer warm (e.g., for post-run diagnostics).
+   *  - OnlineTrainer.trainStep() returns null without touching params or
+   *    velocity — this is the one and only path that is silenced.
+   *
+   * Used by Phase 5 Part 2's pretrained+frozen benchmark condition, which
+   * asks "how good is the init prior, on its own, with no online updates?"
+   * and requires the Predictor's inference path to keep working.
+   *
+   * @param {boolean} enabled
    */
   setEnabled(enabled) {
     this._enabled = !!enabled;
+  }
+
+  /** Read current enabled state (for tests and UI status). */
+  isEnabled() {
+    return this._enabled;
   }
 
   /**

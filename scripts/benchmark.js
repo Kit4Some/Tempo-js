@@ -31,8 +31,15 @@ import puppeteer from "puppeteer";
 
 // --- Config ---------------------------------------------------------------
 
-const RUN_MS = 60_000; // HEADLESS_RUN_MS
-const COOLDOWN_MS = 10_000; // HEADLESS_COOLDOWN_MS
+// RUN_MS / COOLDOWN_MS can be overridden via env vars for smoke testing.
+// Production runs (the ones producing committed results) must use the
+// defaults — the env var path is for harness-verification only.
+const RUN_MS = process.env.TEMPO_RUN_MS
+  ? parseInt(process.env.TEMPO_RUN_MS, 10)
+  : 60_000; // HEADLESS_RUN_MS
+const COOLDOWN_MS = process.env.TEMPO_COOLDOWN_MS
+  ? parseInt(process.env.TEMPO_COOLDOWN_MS, 10)
+  : 10_000; // HEADLESS_COOLDOWN_MS
 const WARMUP_FRAMES = 30; // drop first N frames (JIT + initial paint)
 const SHADOW_MAX_FRAMES = 30_000; // upper bound for 60 s at any workload
 const SEED = 42;
@@ -42,10 +49,22 @@ const PREVIEW_URL = `http://localhost:${PREVIEW_PORT}/tempo/`;
 const WORKLOADS = ["constant", "sawtooth", "burst", "scroll"];
 const SCHEDULERS = ["B0", "B1", "Predictor"];
 
+// Part 2 B1-drift sub-plan: how many reps per workload for the drift check.
+// 2 × 4 = 8 runs keeps the spec's "5-10 runs" bound and takes ~10 min.
+const PART2_DRIFT_REPS = 2;
+
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(SCRIPT_DIR, "..");
-const OUT_RESULTS = resolve(REPO_ROOT, "docs/PHASE5_PART1_RESULTS.jsonl");
 const OUT_SHADOW = resolve(REPO_ROOT, "shadow.jsonl");
+
+function resultsPath(mode) {
+  return resolve(
+    REPO_ROOT,
+    mode === "part2"
+      ? "docs/PHASE5_PART2_RESULTS.jsonl"
+      : "docs/PHASE5_PART1_RESULTS.jsonl",
+  );
+}
 
 const CHROME_FLAGS = [
   "--disable-background-timer-throttling",
@@ -55,8 +74,8 @@ const CHROME_FLAGS = [
 
 // --- Args parse -----------------------------------------------------------
 
-function parseArgs(argv) {
-  const args = { reps: 10, resume: false };
+export function parseArgs(argv) {
+  const args = { reps: 10, resume: false, mode: "part1" };
   for (const a of argv.slice(2)) {
     if (a.startsWith("--reps=")) {
       const n = parseInt(a.split("=")[1], 10);
@@ -66,6 +85,12 @@ function parseArgs(argv) {
       args.reps = n;
     } else if (a === "--resume") {
       args.resume = true;
+    } else if (a.startsWith("--mode=")) {
+      const m = a.split("=")[1];
+      if (m !== "part1" && m !== "part2") {
+        throw new Error(`--mode must be part1 or part2, got ${m}`);
+      }
+      args.mode = m;
     } else {
       throw new Error(`unknown argument: ${a}`);
     }
@@ -110,21 +135,101 @@ function log(msg) {
 
 // --- Run plan -------------------------------------------------------------
 
-function buildRunPlan(reps) {
+// --- Plan & URL builders (pure — exported for testing) -------------------
+
+/**
+ * Build the run plan for one mode. Each entry has:
+ *   { runIndex, executionPosition, workload, active, rep, condition,
+ *     pretrained, freeze }
+ *
+ * Conditions:
+ *   - part1: every run is condition="scratch" (pretrained=false, freeze=false).
+ *     This is the Phase 5 Part 1 behavior.
+ *   - part2: Predictor runs split across two conditions
+ *       "pretrained+online" (pretrained=true, freeze=false)
+ *       "pretrained+frozen" (pretrained=true, freeze=true)
+ *     Plus a B1-only drift sub-plan (condition="scratch") at
+ *     PART2_DRIFT_REPS reps per workload to detect measurement drift
+ *     against Part 1's baseline. B0 is omitted from Part 2 — its Part 1
+ *     role was to produce training data, which Part 2 reuses directly;
+ *     re-measuring B0 would just burn an hour on a known-stable cell.
+ */
+export function buildRunPlan(reps, mode = "part1") {
   const plan = [];
   let runIndex = 0;
-  for (const workload of WORKLOADS) {
-    for (const active of SCHEDULERS) {
-      for (let rep = 0; rep < reps; rep++) {
-        plan.push({ runIndex: runIndex++, workload, active, rep });
+  if (mode === "part1") {
+    for (const workload of WORKLOADS) {
+      for (const active of SCHEDULERS) {
+        for (let rep = 0; rep < reps; rep++) {
+          plan.push({
+            runIndex: runIndex++,
+            workload,
+            active,
+            rep,
+            condition: "scratch",
+            pretrained: false,
+            freeze: false,
+          });
+        }
       }
     }
+  } else if (mode === "part2") {
+    const predictorConditions = [
+      { condition: "pretrained+online", pretrained: true, freeze: false },
+      { condition: "pretrained+frozen", pretrained: true, freeze: true },
+    ];
+    for (const workload of WORKLOADS) {
+      for (const cond of predictorConditions) {
+        for (let rep = 0; rep < reps; rep++) {
+          plan.push({
+            runIndex: runIndex++,
+            workload,
+            active: "Predictor",
+            rep,
+            ...cond,
+          });
+        }
+      }
+      // B1 drift check — same seed/workload as Part 1, fewer reps.
+      for (let rep = 0; rep < PART2_DRIFT_REPS; rep++) {
+        plan.push({
+          runIndex: runIndex++,
+          workload,
+          active: "B1",
+          rep,
+          condition: "scratch",
+          pretrained: false,
+          freeze: false,
+        });
+      }
+    }
+  } else {
+    throw new Error(`buildRunPlan: unknown mode '${mode}'`);
   }
   // Shuffle with seeded PRNG so execution order is reproducible across
-  // --resume invocations. Each entry's executionPosition is assigned AFTER
-  // the shuffle so thermal-attribution joins back to wall-clock order.
+  // --resume invocations. executionPosition is assigned AFTER the shuffle
+  // so thermal-attribution joins back to wall-clock order.
   const shuffled = fisherYates(plan, mulberry32(SEED));
   return shuffled.map((p, i) => ({ ...p, executionPosition: i }));
+}
+
+/**
+ * Build the Puppeteer navigation URL for one plan entry. Encodes the init
+ * condition as query params consumed by benchmark/app.js's parseInitOpts.
+ *
+ *   scratch           → baseURL                    (no query = default)
+ *   pretrained+online → baseURL?init=pretrained
+ *   pretrained+frozen → baseURL?init=pretrained&freeze=true
+ *
+ * Keeping this a pure function (no Puppeteer dependency) lets the plan be
+ * audited without launching Chrome.
+ */
+export function buildRunURL(baseURL, plan) {
+  if (!plan.pretrained && !plan.freeze) return baseURL;
+  const params = new URLSearchParams();
+  if (plan.pretrained) params.set("init", "pretrained");
+  if (plan.freeze) params.set("freeze", "true");
+  return `${baseURL}?${params.toString()}`;
 }
 
 function loadCompletedRunIndexes(path) {
@@ -194,17 +299,30 @@ function stopPreview(child) {
 // --- Single-run execution -------------------------------------------------
 
 async function runOne(page, plan, shadowStream) {
-  // Reload to isolate from previous run's JIT / GC state.
-  await page.goto(PREVIEW_URL, { waitUntil: "networkidle0" });
+  // Navigate with the plan's URL (scratch = no query; pretrained / frozen
+  // inject ?init=...&freeze=... consumed by app.js parseInitOpts). This is
+  // the load-bearing hook that switches between Part 2's three conditions.
+  const url = buildRunURL(PREVIEW_URL, plan);
+  // waitUntil: "load" (not "networkidle0") — the previous run's rAF loop
+  // stays hot after page.goto begins, and "networkidle0" can miss its 500ms
+  // quiet-window when the fresh page starts the next loop before the
+  // previous document's requests fully settle. The subsequent
+  // waitForFunction(() => window.tempo) is the real readiness signal.
+  await page.goto(url, { waitUntil: "load" });
   await page.waitForFunction(() => typeof window.tempo === "object");
 
   // Init with shadow log. Allocating up-front means per-frame logging is
-  // allocation-free (Float32Array + Uint8Array writes only).
+  // allocation-free (Float32Array + Uint8Array writes only). Pass
+  // pretrained/freeze into opts as well — belt-and-suspenders: the URL
+  // already triggered the right default on DOMContentLoaded, but Puppeteer
+  // re-calls init() here to reset metrics cleanly.
   await page.evaluate(
-    (seed, workload, active, shadowMax) => {
+    (seed, workload, active, shadowMax, pretrained, freeze) => {
       window.tempo.stop();
       window.tempo.init(seed, workload, active, {
         shadowMaxFrames: shadowMax,
+        pretrained,
+        freeze,
       });
       window.tempo.start();
     },
@@ -212,6 +330,8 @@ async function runOne(page, plan, shadowStream) {
     plan.workload,
     plan.active,
     SHADOW_MAX_FRAMES,
+    !!plan.pretrained,
+    !!plan.freeze,
   );
 
   const startedAt = new Date().toISOString();
@@ -249,6 +369,12 @@ async function runOne(page, plan, shadowStream) {
     workload: plan.workload,
     active: plan.active,
     rep: plan.rep,
+    // condition tags the init mode so analyze.js can group records across
+    // a single Part 2 results file. Part 1 records lack this field and are
+    // treated as "scratch" by the analyzer.
+    condition: plan.condition,
+    pretrained: !!plan.pretrained,
+    freeze: !!plan.freeze,
     startedAt,
     durationMs,
     warmupFramesDropped: WARMUP_FRAMES,
@@ -362,18 +488,17 @@ process.on("SIGINT", () => {
 
 async function main() {
   const args = parseArgs(process.argv);
-  const plan = buildRunPlan(args.reps);
+  const plan = buildRunPlan(args.reps, args.mode);
   const total = plan.length;
+  const outResults = resultsPath(args.mode);
 
-  mkdirSync(dirname(OUT_RESULTS), { recursive: true });
+  mkdirSync(dirname(outResults), { recursive: true });
 
-  const completed = args.resume
-    ? loadCompletedRunIndexes(OUT_RESULTS)
-    : new Set();
+  const completed = args.resume ? loadCompletedRunIndexes(outResults) : new Set();
   const remaining = plan.filter((p) => !completed.has(p.runIndex));
 
   log(
-    `Plan: ${total} runs total, ${completed.size} already ok, ${remaining.length} to execute.`,
+    `Mode: ${args.mode}. Plan: ${total} runs total, ${completed.size} already ok, ${remaining.length} to execute.`,
   );
   log(
     `Per-run: ${RUN_MS / 1000}s measurement + ${COOLDOWN_MS / 1000}s cooldown. Seed ${SEED}.`,
@@ -429,7 +554,7 @@ async function main() {
         log(`  → ERROR: ${record.error}`);
       }
 
-      appendFileSync(OUT_RESULTS, JSON.stringify(record) + "\n");
+      appendFileSync(outResults, JSON.stringify(record) + "\n");
 
       if (i < remaining.length - 1 && !sigintCaught) {
         await new Promise((r) => setTimeout(r, COOLDOWN_MS));
@@ -440,7 +565,7 @@ async function main() {
     log(
       `Done. ${okCount} ok, ${errCount} error, ${sigintCaught ? "interrupted" : "complete"}. Total ${fmtDuration(totalElapsed)}.`,
     );
-    log(`Results: ${OUT_RESULTS}`);
+    log(`Results: ${outResults}`);
     log(`Shadow:  ${OUT_SHADOW} (ephemeral, gitignored)`);
     process.exit(sigintCaught ? 2 : 0);
   } finally {
@@ -450,9 +575,16 @@ async function main() {
   }
 }
 
-main().catch((e) => {
-  process.stderr.write(
-    `[benchmark] fatal: ${e?.stack ?? e?.message ?? String(e)}\n`,
-  );
-  process.exit(1);
-});
+// Only execute main() when this file is the entry point. Tests import
+// parseArgs / buildRunPlan / buildRunURL and must not trigger a real
+// Puppeteer run on import.
+const invokedAsScript =
+  process.argv[1] && process.argv[1].endsWith("benchmark.js");
+if (invokedAsScript) {
+  main().catch((e) => {
+    process.stderr.write(
+      `[benchmark] fatal: ${e?.stack ?? e?.message ?? String(e)}\n`,
+    );
+    process.exit(1);
+  });
+}

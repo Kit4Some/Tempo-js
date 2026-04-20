@@ -2,8 +2,7 @@
 
 _Generated: 2026-04-18T12:18:37.640Z · Node v22.18.0 · win32 x64_
 
-Batch-accumulation methodology per PHASE5_NOTES.md § Measurement methodology.
-Warm-up: 100 iterations (discarded). Measured window: 1000 iterations.
+Batch-accumulation methodology: N = 1000 iterations per component, divided by N; 100-iteration warm-up discarded (JIT cold-start). No per-call `performance.now()` reads (Spectre 5 μs floor) and no `performance.measure` marks (Heisenberg). See [METHODOLOGY.md](METHODOLOGY.md) for the full protocol.
 
 ## Per-component cost
 

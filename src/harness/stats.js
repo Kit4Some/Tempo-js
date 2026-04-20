@@ -1,7 +1,7 @@
-// Pure-JS statistics for Phase 5 Go/No-Go analysis (spec §4 Phase 5 Part 1,
-// methodology PHASE5_NOTES.md § Statistical methodology). Intentionally
-// zero-dependency: the blog-post promise is "353-parameter MLP + pure JS",
-// and bringing scipy/R as a dependency would undermine that claim.
+// Pure-JS statistics for the Phase 5 Go/No-Go analysis. Intentionally
+// zero-dependency: the project's central claim is "353-parameter MLP +
+// pure JS", and bringing scipy/R as a dependency would undermine that
+// claim for the analysis pipeline that produces the headline numbers.
 //
 // Asymptotic approximations are used where scipy would use exact tests for
 // small n. For n1 = n2 = 10 (Part 1's reps-per-cell), this shifts two-sided

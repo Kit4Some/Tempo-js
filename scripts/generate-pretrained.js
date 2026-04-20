@@ -15,7 +15,7 @@
 // sourceDataSHA256 field in PRETRAINED_META commits to the exact JSONL
 // contents the weights were trained on.
 //
-// Limitations (documented in PHASE5_NOTES.md and the blog post):
+// Limitations (mirror in the blog post):
 //   - Replay reconstructs the 12-dim feature vector from dt only. Shadow log
 //     does not record scrollVelocity / inputEvents / DOM / memory, so
 //     features 6-9 (gc_pressure, input_activity, scroll_velocity, anims,

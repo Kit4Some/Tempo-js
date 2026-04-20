@@ -3,7 +3,7 @@
 // Answers: "is the headless harness quiet enough that scheduler deltas
 // can be measured above the noise floor?"
 //
-// Protocol (PHASE5_NOTES.md § Part 0):
+// Protocol:
 //   1. npm run build → dist/
 //   2. vite preview serves dist/ at http://localhost:4173/tempo/
 //   3. Puppeteer launches headless Chrome with the spec §5 flags
@@ -14,7 +14,7 @@
 //      read B0.all.getStats() — that's the harness's ambient jank floor
 //      (B0 never reduces/degrades, so any jank is pure harness noise).
 //
-// Gates (PHASE5_NOTES.md § Part 0):
+// Gates:
 //   - floor > live (~10%)   → DEBUG (harness worse than live, broken)
 //   - floor ≥ 8%             → DEBUG (suspect Puppeteer/flags/page)
 //   - floor 3–8%             → PROCEED with new baseline
@@ -33,7 +33,7 @@ import { fileURLToPath } from "node:url";
 
 import puppeteer from "puppeteer";
 
-const RUN_MS = 60_000; // HEADLESS_RUN_MS — PHASE5_NOTES calibration
+const RUN_MS = 60_000; // HEADLESS_RUN_MS — matches the Part 1/Part 2 sweep
 const SEED = 42;
 const WORKLOAD = "constant";
 const ACTIVE = "B0";

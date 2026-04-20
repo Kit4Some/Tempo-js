@@ -3,13 +3,13 @@
 // Answers: "does forward + push + trainStep per-frame cost leave enough
 // budget for the scheduler's decision to actually save time?"
 //
-// Methodology (PHASE5_NOTES.md § Measurement methodology):
+// Methodology:
 //   Batch accumulation with N = 1000 iterations per component. Divide
 //   total by N. Warm up with 100 iterations first to absorb JIT
 //   cold-start skew. No performance.measure() marks (Heisenberg), no
 //   per-call now() reads (Spectre 5μs resolution floor).
 //
-// Gates (PHASE5_NOTES.md § Part 0 Go/No-Go):
+// Gates:
 //   - If per-frame infra (upper bound) > 30% of FRAME_BUDGET_60 → ABORT.
 //   - Else → PROCEED to scripts/measure-floor.js.
 //
@@ -152,7 +152,7 @@ function main() {
     "",
     `_Generated: ${result.timestamp} · Node ${result.node_version} · ${result.platform}_`,
     "",
-    `Batch-accumulation methodology per PHASE5_NOTES.md § Measurement methodology.`,
+    `Batch-accumulation methodology — N=1000 iterations per component, divide by N after; 100 warmup iterations absorb JIT skew; no per-call now() reads (Spectre resolution floor) and no performance.measure() marks (Heisenberg).`,
     `Warm-up: ${WARMUP_ITERATIONS} iterations (discarded). Measured window: ${MEASURE_ITERATIONS} iterations.`,
     "",
     "## Per-component cost",

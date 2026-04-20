@@ -172,6 +172,22 @@ Freezing the pretrained weights costs 7–8 percentage points of jank on the ram
 
 Both are frozen priors. B1 is 3 EMA thresholds; Pretrained+Frozen is a 353-parameter MLP trained on 334,510 samples. On the two ramping workloads B1 was originally hand-crafted for, B1 destroys the learned prior (d ≈ −114 on scroll, d ≈ −649 on sawtooth — effect sizes so large they mainly reflect how tight B1's deterministic variance is).
 
+## On effect sizes
+
+The `d` values above reach magnitudes (up to −649) that would be
+implausible under Cohen's conventional "large = 0.8" calibration.
+Those conventions come from human-subjects research where
+run-to-run SD is a sizable fraction of the mean; this benchmark's
+controlled headless environment produces SDs in the 0.001–0.3 pp range
+because B1 and Pretrained+Frozen are both deterministic at the chosen
+seed. The manual recomputation in
+[PHASE5_COHENS_D_VALIDATION.md](PHASE5_COHENS_D_VALIDATION.md) matches
+`analyze.js` bit-for-bit — the d values are mathematically correct,
+but **the practical magnitude of each comparison is the |Δ| in
+percentage points, not the `d`**. Treat `d` here as a
+"not-measurement-noise" qualifier and read the pp figures for the real
+story.
+
 ## Structural conclusion
 
 **Part 1's deficit is not a cold-start artifact. It is structural.**

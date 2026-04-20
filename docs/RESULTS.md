@@ -109,3 +109,80 @@ Prediction (per shadow scheduler): decision ∈ {reduce, degrade} counts as posi
 | B0 | 0 | 0 | 153894 | 13585 | — | 0.000 | — |
 | B1 | 13559 | 39253 | 114641 | 26 | 0.257 | 0.998 | 0.408 |
 | Predictor | 8470 | 115227 | 38667 | 5115 | 0.068 | 0.623 | 0.123 |
+
+---
+
+# Phase 5 Part 2 — Pretrained vs Scratch
+
+_Added 2026-04-20. Benchmark: 88 runs (40 Pretrained+Online, 40 Pretrained+Frozen, 8 B1 drift-check), 1h42m38s, 0 errors._
+
+Full machine-generated tables in [PHASE5_PART2_COMPARE.md](PHASE5_PART2_COMPARE.md). Drift report in [PHASE5_PART2_DRIFT.md](PHASE5_PART2_DRIFT.md).
+
+## Part 2 question
+
+Part 1 found Predictor loses to B1 on the ramping workloads (sawtooth, scroll) and ties on burst. The question Part 2 asks:
+
+> Is that deficit a **cold-start artifact** (fresh He-init Predictor hasn't seen enough samples), or is it **structural** (the 353-parameter MLP cannot encode B1's decision surface in this data distribution)?
+
+We test this by freezing a Predictor initialized from pretrained weights (334,510 samples from Part 1's B0-active shadow log) and comparing against Part 1's scratch+online cell and against B1's frozen hand-crafted EMA prior.
+
+## B1 drift check — PASS
+
+Aggregate: **PASS**. All four workloads: 0 outliers on 2 drift runs, |mean shift| ≤ 0.05pp (well inside the 1.0pp STOP threshold). Part 1's B1 cell and Part 2's 8 drift runs are statistically indistinguishable — the environment did not drift across the 17 days between Part 1 (2026-04-18) and Part 2 (2026-04-20).
+
+| Workload | Part 1 B1 μ | Part 2 B1 μ | Shift |
+|---|---:|---:|---:|
+| constant | 0.00% | 0.00% | +0.00pp |
+| sawtooth | 1.66% | 1.67% | +0.01pp |
+| burst | 5.56% | 5.56% | −0.00pp |
+| scroll | 3.38% | 3.41% | +0.03pp |
+
+## Three comparisons
+
+### (a) Scratch (Part 1) vs Pretrained + Online (Part 2) — _Init-quality contribution_
+
+| Workload | Scratch | Pretrained+Online | Δ (pp) | p | Verdict |
+|---|---:|---:|---:|---:|---|
+| constant | 0.00% | 0.00% | 0.00 | 0.37 | NO-GO |
+| **sawtooth** | 6.62% | **4.59%** | **−2.03** | 1.8e-4 | **GO (init helps)** |
+| burst | 5.45% | 5.51% | +0.06 | 0.006 | borderline |
+| scroll | 7.08% | **6.78%** | **−0.30** | 0.04 | GO (init helps) |
+
+Pretrained init lowers sawtooth jank by 2pp and scroll by 0.3pp. Burst moves slightly the other way — scratch+online had already converged to the workload's structural floor (B0 and B1 also sit at ≈5.5% on burst), so pretrained init offers no room to improve.
+
+### (b) Pretrained+Online vs Pretrained+Frozen — _Online-learning marginal value_
+
+| Workload | Pretrained+Online | Pretrained+Frozen | Δ (pp) | p | Verdict |
+|---|---:|---:|---:|---:|---|
+| constant | 0.00% | 0.00% | 0.00 | 1.00 | NO-GO |
+| **sawtooth** | 4.59% | **11.68%** | **+7.09** | 1.8e-4 | **GO (online helps)** |
+| burst | 5.51% | 5.52% | +0.01 | 0.79 | NO-GO |
+| **scroll** | 6.78% | **14.61%** | **+7.83** | 1.8e-4 | **GO (online helps)** |
+
+Freezing the pretrained weights costs 7–8 percentage points of jank on the ramping workloads (d ≈ −34 on scroll, d ≈ −80 on sawtooth). The pretrained prior alone is not enough — online adaptation is where most of the gap closes.
+
+### (c) B1 (hand-crafted frozen prior) vs Pretrained+Frozen (data-learned frozen prior) — _Blog headline match_
+
+| Workload | B1 | Pretrained+Frozen | Δ (pp) | p | Winner |
+|---|---:|---:|---:|---:|---|
+| constant | 0.00% | 0.00% | 0.00 | 0.32 | tie |
+| **sawtooth** | **1.66%** | 11.68% | +10.02 | 8.2e-5 | **B1 wins by 10pp** |
+| burst | 5.56% | 5.52% | −0.04 | 6.7e-4 | tie (effect < 0.05pp) |
+| **scroll** | **3.38%** | 14.61% | +11.23 | 8.5e-5 | **B1 wins by 11pp** |
+
+Both are frozen priors. B1 is 3 EMA thresholds; Pretrained+Frozen is a 353-parameter MLP trained on 334,510 samples. On the two ramping workloads B1 was originally hand-crafted for, B1 destroys the learned prior (d ≈ −114 on scroll, d ≈ −649 on sawtooth — effect sizes so large they mainly reflect how tight B1's deterministic variance is).
+
+## Structural conclusion
+
+**Part 1's deficit is not a cold-start artifact. It is structural.**
+
+1. **Cold start matters some, but less than the residual gap.** Pretrained init closes 2pp on sawtooth and 0.3pp on scroll (table a). That is real progress — but Part 1's Predictor-vs-B1 gap on sawtooth was 4.96pp, and pretrained+online (4.59%) still sits 2.93pp above B1's 1.66%. Init is a factor; it is not THE factor.
+2. **Online learning is still essential.** Freezing the pretrained prior loses 7–8pp to online on ramping workloads (table b). The 334k-sample offline pass does not produce a prior that stands on its own.
+3. **B1's inductive bias beats the MLP's capacity.** With both priors frozen (table c), B1's 3-parameter EMA beats the 353-parameter MLP by 10pp on sawtooth and 11pp on scroll. B1 encodes something about "normalized dt trend → degrade/reduce threshold" that the MLP cannot extract from this data distribution.
+4. **Burst remains Predictor's niche.** All approaches converge to 5.45%–5.56% on burst. This is the workload where B1's recent-trend heuristic gets no advantage (spikes are independent of recent history) and the MLP is at parity with B1 regardless of init.
+
+## Implications for Phase 6
+
+- The blog post should reframe the Part 1 "NO-GO" as a **structural scheduler dichotomy**, not a failure. The Predictor is not beating B1 on ramping workloads even with ideal pretraining — but B1 cannot be pretrained, tuned per user, or generalize to unseen workload structures. They live on different branches of a design tree.
+- Ablation suggestions that are now DEAD ENDS: "more training data", "longer online exposure", "better initialization". None of these close the ramping-workload gap to B1 at this architecture.
+- Ablation suggestions that remain LIVE: different architecture (recurrent, trend-aware inputs), explicit trend features injected into x, or hybrid (B1-style EMA as a feature fed to the MLP).

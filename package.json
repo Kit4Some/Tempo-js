@@ -8,7 +8,11 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "bench:part1": "node scripts/benchmark.js --mode=part1 --reps=10",
+    "bench:part2": "node scripts/benchmark.js --mode=part2 --reps=10",
+    "bench:compare": "node scripts/analyze.js --compare=docs/PHASE5_PART1_RESULTS.jsonl,docs/PHASE5_PART2_RESULTS.jsonl",
+    "bench:drift": "node scripts/drift-check.js --part1=docs/PHASE5_PART1_RESULTS.jsonl --part2=docs/PHASE5_PART2_RESULTS.jsonl"
   },
   "devDependencies": {
     "puppeteer": "^23.0.0",

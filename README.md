@@ -1,120 +1,106 @@
 # Tempo
 
-A 353-parameter online-learning MLP that predicts browser frame-budget
-overruns and drives an adaptive frame-work scheduler. Research artifact,
-not an npm library.
+Can a 353-parameter online-learning MLP outperform a well-tuned EMA heuristic at browser frame scheduling? Three ablations across 208 benchmark runs locate the answer: mostly no, with a tie on burst — the one workload where EMA's smoothing can't keep up.
+
+**Status.** Phase 5 complete — Part 1 (scheduler comparison, 120 runs) and Part 2 (pretrained vs scratch, 88 runs) both committed. Blog post forthcoming (Phase 6b). This is a research artifact, not a maintained library; PRs are not reviewed.
 
 ## TL;DR
 
-On four synthetic browser workloads benchmarked in headless Chrome over
-208 sixty-second runs, a hand-crafted 3-parameter EMA baseline (`B1`)
-beats the 353-parameter MLP on both ramping workloads by 7–10 percentage
-points of jank rate, even when the MLP is initialised from weights
-pretrained on 334,510 samples of the same distribution. On the
-unpredictable-spike workload (`burst`) all schedulers converge to the
-same ~5.5 % floor, which is where the learned model finds its niche.
+On predictable ramps (sawtooth, scroll-correlated), a well-tuned EMA heuristic beats a 353-parameter MLP by ~10 percentage points in jank rate — even when the MLP is pretrained on over 300,000 samples of in-distribution data and given 60 seconds of online learning per run.
 
-The central finding is structural, not a cold-start artifact: the gap to
-B1 persists under ideal pretraining + continued online learning
-([RESULTS.md](docs/RESULTS.md) Part 2 section (c)). The Predictor's
-inductive bias is wrong for recent-trend threshold crossing; it is at
-parity only on the workload where that bias is useless.
+On unpredictable bursts, the MLP holds its own (within noise).
 
-## Architecture
+Three ablations located the source of the gap: not cold-start, not data quantity, not online learning cadence.
 
-| Component | Detail |
-|---|---|
-| Feature extractor | `src/core/features.js` — 12-dim `Float32Array` per frame (dt EMAs, variance, max, miss-rate, GC pressure, scroll velocity, input activity, DOM mutations, visible animations, workload-delta, device tier). |
-| Predictor | `src/core/predictor.js` — 12 → 16 → 8 → 1 MLP with ReLU hidden activations and sigmoid output. Float32 parameters, Float64 hidden activations. Zero-allocation `forward()` / `backward()` after construction. |
-| Trainer | `src/core/trainer.js` — SGD with momentum, L2 gradient clip, ring buffer of recent samples, sample-with-replacement minibatches. |
-| Schedulers | `src/core/schedulers.js` — `B0_AlwaysFull` (reference), `B1_EmaThreshold` (hand-crafted), `PredictorScheduler` (MLP-driven). |
-| Harness | `src/harness/` — `SequentialLoop` runs one active scheduler per run while the other two observe as shadows. `FrameMetrics` + `RollingFrameMetrics` aggregate per-run and per-window statistics. `pretrained.js` inlines the trained weights for offline initialisation. |
-| Stats | `src/harness/stats.js` — pure-JS Mann–Whitney U (asymptotic, continuity-corrected, tie-adjusted), Cohen's d (pooled SD), seeded 1000-resample percentile bootstrap. No scipy / R dependency. |
+The handcrafted EMA encodes a recent-trend decision surface that a 353-param MLP can't learn from this data distribution. The gap is a capacity or inductive-bias limit, not a training one.
 
-See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for the full measurement
-and statistical protocol.
+Full numbers in §4 and [docs/RESULTS.md](docs/RESULTS.md).
 
-## Live page
+## Key results
 
-`benchmark/index.html` is the sole web entry. Visit it to watch the
-three schedulers race on a chosen workload in real time, inspect a
-parameter heatmap, and run a comparison sequence over all three.
+Jank-rate means per `(workload, scheduler)` cell, 60 s per run, n = 10 reps (n = 12 for B1 after combining Part 1 + Part 2 drift-check). 95 % percentile bootstrap CIs in [RESULTS.md](docs/RESULTS.md).
 
-Supported: Chrome 47+, Firefox 55+, Edge 79+. Safari is explicitly
-unsupported; the page relies on `requestIdleCallback` for training
-cadence and shows a compatibility banner instead of silently
-misbehaving under a `setTimeout` polyfill.
+| Workload | B0 | B1 | Pred (Scr) | Pred (Pr+On) | Pred (Pr+Fr) | Best | Notes |
+|---|---:|---:|---:|---:|---:|---|---|
+| constant | 0.00 % | 0.00 % | 0.00 % | 0.00 % | 0.00 % | tied | sanity (below measurement floor) |
+| sawtooth | 11.69 % | **1.66 %** | 6.62 % | 4.59 % | 11.68 % | **B1** | Frozen ≈ B0 |
+| burst | 5.55 % | 5.56 % | **5.45 %** | 5.51 % | 5.52 % | Scratch (tied) | within noise |
+| scroll | 14.68 % | **3.38 %** | 7.08 % | 6.78 % | 14.61 % | **B1** | Frozen ≈ B0 |
 
-## Quick start
+*`B0` = always-full reference (never reduces or degrades). `B1` = EMA-threshold heuristic.*
+*`Pred (Scr)` = scratch initialization + online learning (Part 1 baseline).*
+*`Pred (Pr+On)` = pretrained initialization + online learning.*
+*`Pred (Pr+Fr)` = pretrained initialization, frozen weights (no online learning).*
+
+Row-wise winner in **bold**.
+
+Directional p-values and Cohen's d in [PHASE5_PART2_COMPARE.md](docs/PHASE5_PART2_COMPARE.md). B1 drift between Part 1 and Part 2 was ≤ 0.03 pp on every workload ([PHASE5_PART2_DRIFT.md](docs/PHASE5_PART2_DRIFT.md)).
+
+### On effect sizes
+
+Cohen's d values in [docs/RESULTS.md](docs/RESULTS.md) are unusually large (|d| up to 649 in Table c). This is an artifact of minimal run-to-run variance in headless Chrome, not an error — pooled standard deviation drops to 0.015 pp for deterministic schedulers, inflating d. Interpret magnitudes as percentage-point differences in the tables above; treat d as a "beyond measurement noise" qualifier only. Full validation in [docs/PHASE5_COHENS_D_VALIDATION.md](docs/PHASE5_COHENS_D_VALIDATION.md).
+
+<!-- Day 3 activation pending: Live demo section (GitHub Pages URL + live-vs-headless floor discussion) goes here once the repo flips to public. -->
+
+## Design
+
+Single-file-per-concern, zero runtime dependencies in the core. `devDependencies` only: `vite`, `vitest`, `puppeteer`.
+
+**Core:**
+- [src/core/predictor.js](src/core/predictor.js) — 353-parameter MLP (`12 → 16 → 8 → 1`), zero-allocation `forward` / `backward`.
+- [src/core/trainer.js](src/core/trainer.js) — SGD with momentum + L2 grad clip, ring-buffer minibatches.
+- [src/core/features.js](src/core/features.js) — 12-dim feature extractor.
+- [src/core/schedulers.js](src/core/schedulers.js) — `B0_AlwaysFull`, `B1_EmaThreshold`, `PredictorScheduler`.
+- [src/core/constants.js](src/core/constants.js) — single source of truth for tunable numerics.
+
+**Harness:**
+- [src/harness/sequential-loop.js](src/harness/sequential-loop.js) — one active + two shadow schedulers per frame.
+- [src/harness/metrics.js](src/harness/metrics.js) — `FrameMetrics`, `RollingFrameMetrics`.
+- [src/harness/stats.js](src/harness/stats.js) — pure-JS Mann–Whitney U, Cohen's d, seeded percentile bootstrap.
+- [src/harness/pretrained.js](src/harness/pretrained.js) — inlined 353-element `Float32Array` with training provenance metadata.
+
+**Scripts:**
+- [scripts/benchmark.js](scripts/benchmark.js) — Puppeteer headless benchmark (`--mode=part1|part2`, `--resume`).
+- [scripts/analyze.js](scripts/analyze.js) — Go/No-Go rendering + Part 2 `--compare`.
+- [scripts/drift-check.js](scripts/drift-check.js) — Part 2 B1 drift gate.
+- [scripts/generate-pretrained.js](scripts/generate-pretrained.js) — offline training from Part 1 shadow log.
+- [scripts/measure-overhead.js](scripts/measure-overhead.js), [scripts/measure-floor.js](scripts/measure-floor.js) — Part 0 harness probes.
+
+**Tests:** 260 vitest cases covering predictor numerics (analytic-vs-numeric gradcheck), Mann–Whitney U against scipy reference values, bootstrap determinism, harness glue, pure DOM helpers, and the full analyze / benchmark / drift pipeline.
+
+## Development
 
 ```bash
 npm install
-npm run dev        # live benchmark at http://localhost:5173/
-npm test           # vitest suite (260 tests)
-npm run build      # production build to dist/
-npm run preview    # preview the production build locally
+npm run dev       # live benchmark at http://localhost:5173/Tempo-js/
+npm test          # vitest suite (260 tests)
+npm run build     # production build to dist/
+npm run preview   # preview the production build at http://localhost:4173/Tempo-js/
 ```
 
-### URL query parameters
+The live page in `benchmark/index.html` reads two optional URL parameters:
 
-`benchmark/app.js` reads two flags from `location.search`:
+- `?init=pretrained` loads the Predictor from [src/harness/pretrained.js](src/harness/pretrained.js) instead of random He-initialisation.
+- `&freeze=true` disables `OnlineTrainer.trainStep()` for the session (the Predictor keeps scoring, only learning is silenced).
 
-- `?init=pretrained` initialises the Predictor from
-  `src/harness/pretrained.js` instead of He-initialised random weights.
-- `&freeze=true` disables `OnlineTrainer.trainStep()` for the session.
-  `Predictor.forward()` still runs (the scheduler keeps scoring
-  `p_miss`); only the learning path is silenced.
+Default (`?init=scratch`, no freeze) reproduces the Phase 4 / Part 1 behaviour.
 
-Defaults (`?init=scratch`, no freeze) reproduce the Phase 4 / Part 1
-behaviour.
+## Methodology and reproducibility
 
-## Results summary
+- **Protocol:** [docs/METHODOLOGY.md](docs/METHODOLOGY.md) — frame model, workloads, schedulers, Chrome flags, run-plan shuffling, stats, Go/No-Go gate, Part 2 drift rule.
+- **Raw results:** [docs/PHASE5_PART1_RESULTS.jsonl](docs/PHASE5_PART1_RESULTS.jsonl) (120 runs), [docs/PHASE5_PART2_RESULTS.jsonl](docs/PHASE5_PART2_RESULTS.jsonl) (88 runs).
+- **Part 0 probes:** [docs/PHASE5_PART0_OVERHEAD.md](docs/PHASE5_PART0_OVERHEAD.md) (predictor infra cost), [docs/PHASE5_PART0_FLOOR.md](docs/PHASE5_PART0_FLOOR.md) (headless ambient floor).
+- **Pretrained artifact:** [docs/PHASE5_PART2_WEIGHTS.json](docs/PHASE5_PART2_WEIGHTS.json) with `sourceDataSHA256` pinning the exact `shadow.jsonl` input.
 
-Full tables and interpretation in [docs/RESULTS.md](docs/RESULTS.md).
-Machine-readable records:
-
-- [docs/PHASE5_PART1_RESULTS.jsonl](docs/PHASE5_PART1_RESULTS.jsonl) —
-  120 runs (4 workloads × 3 schedulers × 10 reps).
-- [docs/PHASE5_PART2_RESULTS.jsonl](docs/PHASE5_PART2_RESULTS.jsonl) —
-  88 runs (40 `pretrained+online` + 40 `pretrained+frozen` + 8 B1
-  drift-check).
-- [docs/PHASE5_PART2_COMPARE.md](docs/PHASE5_PART2_COMPARE.md) — three
-  pre-registered comparison tables from `scripts/analyze.js --compare`.
-- [docs/PHASE5_PART2_DRIFT.md](docs/PHASE5_PART2_DRIFT.md) — harness
-  health report (drift from `scripts/drift-check.js`).
-
-Part 1 jank rate means (95 % percentile bootstrap CIs in RESULTS.md):
-
-| Workload | B0 | B1 | Predictor |
-|---|---:|---:|---:|
-| constant | 0.00 % | 0.00 % | 0.00 % |
-| sawtooth | 11.69 % | **1.66 %** | 6.62 % |
-| burst | 5.55 % | 5.56 % | **5.45 %** |
-| scroll | 14.68 % | **3.38 %** | 7.08 % |
-
-Part 2 (Predictor conditions, same seeds):
-
-| Workload | Scratch + online | Pretrained + online | Pretrained + frozen |
-|---|---:|---:|---:|
-| constant | 0.00 % | 0.00 % | 0.00 % |
-| sawtooth | 6.62 % | 4.59 % | 11.68 % |
-| burst | 5.45 % | 5.51 % | 5.52 % |
-| scroll | 7.08 % | 6.78 % | 14.61 % |
-
-## Reproducing the benchmark
-
-### Part 1 — 120-run sweep (~2 h 25 m)
+### Reproducing the benchmark
 
 ```bash
+# Part 1 (120 runs, ≈2 h 25 m)
 npm run build
 node scripts/benchmark.js --mode=part1 --reps=10
 node scripts/analyze.js
-```
 
-### Part 2 — 88-run pretrained sweep (~1 h 43 m)
-
-```bash
-npm run build
+# Part 2 (88 runs, ≈1 h 43 m)
 node scripts/benchmark.js --mode=part2 --reps=10
 node scripts/drift-check.js --part1=docs/PHASE5_PART1_RESULTS.jsonl --part2=docs/PHASE5_PART2_RESULTS.jsonl
 node scripts/analyze.js --compare=docs/PHASE5_PART1_RESULTS.jsonl,docs/PHASE5_PART2_RESULTS.jsonl
@@ -123,73 +109,22 @@ node scripts/analyze.js --compare=docs/PHASE5_PART1_RESULTS.jsonl,docs/PHASE5_PA
 ### Regenerating the pretrained weights
 
 ```bash
-# Requires Part 1's shadow.jsonl (generated during --mode=part1; gitignored).
+# Requires Part 1's shadow.jsonl (generated during --mode=part1, gitignored).
 node scripts/generate-pretrained.js --seed=42 --epochs=5 --batch=64
 ```
 
-Determinism is enforced by `tests/generate-pretrained.test.js`: given
-the same seed and the same shadow-log SHA-256
-(`PRETRAINED_META.sourceDataSHA256` pins the current value), the script
-produces byte-identical weights.
+`tests/generate-pretrained.test.js` enforces determinism: given the same seed and the same `shadow.jsonl` SHA-256 (pinned in `PRETRAINED_META`), the script produces byte-identical weights.
 
-### Part 0 harness probes
+## Browser support
 
-```bash
-node scripts/measure-overhead.js      # predictor-infra per-frame cost
-node scripts/measure-floor.js         # headless ambient jank floor
-```
-
-## Project layout
-
-```
-benchmark/       Live page (index.html, app.js, charts.js, live-controls.js, style.css)
-src/core/        Feature extractor, Predictor, OnlineTrainer, schedulers, constants
-src/harness/     SequentialLoop, metrics, workloads, work-cost, pretrained weights, stats
-scripts/         benchmark / analyze / drift-check / generate-pretrained / Part 0 probes
-tests/           Vitest suites — 260 tests covering numerics (gradcheck, Mann–Whitney
-                 against scipy reference values, bootstrap determinism), harness glue,
-                 pure-function DOM helpers, and end-to-end integration smoke
-docs/            Methodology, results, raw JSONL, comparison and drift reports
-```
-
-## Methodology in one paragraph
-
-Headless Chrome (Puppeteer + `vite preview`) with background-throttling
-flags disabled. Each run: 60 s measurement + 10 s cooldown, first
-30 frames dropped as JIT warm-up. Four synthetic workloads (`constant`,
-`sawtooth`, `burst`, `scroll`); one active scheduler per run with the
-other two observed as shadows for confusion-matrix accounting. Jank
-threshold is budget + 1.0 ms vsync-jitter tolerance. 120-run sweep
-(Part 1) shuffled with a seeded Fisher–Yates (seed = 42); Part 2's 88
-runs use the same shuffle seed with condition-specific URL queries.
-Go / No-Go gate: two-sided Mann–Whitney U `p < 0.05` **and** Cohen's
-`|d| ≥ 0.5` on jank rate versus B1, with 95 % percentile bootstrap CIs
-from 1000 seeded resamples (BOOT_SEED = 20260419). Failure policy
-suppresses the verdict if `status = "error"` exceeds 5 % of runs.
-
-## Limitations
-
-- **In-distribution only.** Pretrained weights are trained on Part 1's
-  B0-active shadow log; Part 2 evaluation samples the same four-workload
-  distribution. Out-of-distribution generalisation is explicitly out of
-  scope.
-- **Feature replay gap.** Training data re-extracts the 12-dim feature
-  vector from shadow-log `dt` only. Scroll velocity, input events, DOM
-  mutations and GC pressure are zero during training because the shadow
-  log doesn't record them. Live and headless evaluation also run with
-  these signals near zero, so the gap is small — but it exists.
-- **Device tier pinned.** Pretrained weights assume
-  `DEVICE_TIER_DEFAULT = 1`. `navigator.hardwareConcurrency` varies by
-  host; reproducing the exact weights across machines requires
-  `hardwareConcurrency: undefined` in the `FeatureExtractor`
-  constructor.
-- **Asymptotic Mann–Whitney U.** At `n = 10` per cell the asymptotic
-  normal approximation diverges from scipy's exact test by ~50 % at
-  the tails (e.g., 1e-4 exact vs 2e-4 asymptotic). The `p < 0.05`
-  gate is insensitive to that gap; a cross-check against scipy for a
-  disputed cell would re-open that assumption.
-- **Safari unsupported.** See the Live page section above.
+Chrome 47+, Firefox 55+, Edge 79+. Safari is unsupported — the page relies on `requestIdleCallback` for training cadence and paint deferral; a `setTimeout` polyfill would distort training semantics, so the page shows a compatibility banner instead of silently misbehaving.
 
 ## License
 
 [MIT](LICENSE). Copyright © 2026 Haksung Lee.
+
+## Acknowledgements
+
+Inspired by Karpathy's microGPT: "the full algorithmic content of what is needed." Everything else, as Karpathy notes, is just efficiency. The neural net here operates at a very different scale, but the zero-dependency, math-first principle is borrowed directly.
+
+The work-cost multipliers (0.7 for reduce, 0.35 for degrade) are calibrated against the decorative/essential split pattern common in animation libraries (Framer Motion, Motion One). Sensitivity analysis for these values is a limitation noted in [METHODOLOGY.md](docs/METHODOLOGY.md).

@@ -5,7 +5,7 @@
 //
 // Protocol:
 //   1. npm run build → dist/
-//   2. vite preview serves dist/ at http://localhost:4173/tempo/
+//   2. vite preview serves dist/ at http://localhost:4173/Tempo-js/
 //   3. Puppeteer launches headless Chrome with the spec §5 flags
 //      (--disable-background-timer-throttling, --disable-renderer-
 //      backgrounding, --disable-backgrounding-occluded-windows)
@@ -38,7 +38,7 @@ const SEED = 42;
 const WORKLOAD = "constant";
 const ACTIVE = "B0";
 const PREVIEW_PORT = 4173;
-const PREVIEW_URL = `http://localhost:${PREVIEW_PORT}/tempo/`;
+const PREVIEW_URL = `http://localhost:${PREVIEW_PORT}/Tempo-js/`;
 const LIVE_FLOOR_PERCENT = 10; // from Phase 4 verification
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));

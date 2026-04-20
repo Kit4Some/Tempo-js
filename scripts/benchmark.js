@@ -44,7 +44,7 @@ const WARMUP_FRAMES = 30; // drop first N frames (JIT + initial paint)
 const SHADOW_MAX_FRAMES = 30_000; // upper bound for 60 s at any workload
 const SEED = 42;
 const PREVIEW_PORT = 4173;
-const PREVIEW_URL = `http://localhost:${PREVIEW_PORT}/tempo/`;
+const PREVIEW_URL = `http://localhost:${PREVIEW_PORT}/Tempo-js/`;
 
 const WORKLOADS = ["constant", "sawtooth", "burst", "scroll"];
 const SCHEDULERS = ["B0", "B1", "Predictor"];

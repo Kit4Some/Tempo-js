@@ -115,7 +115,7 @@ describe("buildRunPlan — part2", () => {
 });
 
 describe("buildRunURL", () => {
-  const BASE = "http://localhost:4173/tempo/";
+  const BASE = "http://localhost:4173/Tempo-js/";
 
   it("returns the bare URL for scratch (no query)", () => {
     const plan = { pretrained: false, freeze: false };

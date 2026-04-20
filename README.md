@@ -12,7 +12,7 @@ On unpredictable bursts, the MLP holds its own (within noise).
 
 Three ablations in the Phase 5 benchmark ruled out the obvious suspects: not cold-start, not data quantity, not online learning cadence.
 
-A companion single-file analysis, [`tempo.js`](./tempo.js), isolates the actual mechanism. The MLP has the representational capacity to imitate the EMA heuristic — 98% train agreement when supervised offline on B1's decisions. But online SGD and offline distillation, starting from identical initialization, converge to nearly-orthogonal weight vectors (cosine 0.105; same-seed online runs cluster at 0.9997 for reference). The two optimizers are solving geometrically different problems, not the same problem at different learning rates.
+A companion single-file analysis, [`tempo.js`](./tempo.js) (comment-stripped twin: [`tempo_onlycode.js`](./tempo_onlycode.js)), isolates the actual mechanism. The MLP has the representational capacity to imitate the EMA heuristic — 98% train agreement when supervised offline on B1's decisions. But online SGD and offline distillation, starting from identical initialization, converge to nearly-orthogonal weight vectors (cosine 0.105; same-seed online runs cluster at 0.9997 for reference). The two optimizers are solving geometrically different problems, not the same problem at different learning rates.
 
 The residual gap is a learnability gap under online self-generated data, not a capacity limit of the 353-parameter architecture. Falsifiable repair directions (DAgger, distillation-anchored loss, grid-supervised pretraining) are listed in `tempo.js` §14.
 
@@ -83,6 +83,8 @@ Single-file-per-concern, zero runtime dependencies in the core. `devDependencies
 Run: `node tempo.js` for the full sawtooth report. Other workloads: `node tempo.js burst` or `node tempo.js scroll` (benchmark only).
 
 This file is the reference for the forthcoming blog post's mechanistic narrative. The Phase 5 production pipeline lives in `src/`, `scripts/`, and `docs/`; `tempo.js` distills *why* the Phase 5 numbers came out the way they did. Both reference the same constants, the same MLP architecture, and the same deterministic seed protocol.
+
+For readers who want the logic alone: [`tempo_onlycode.js`](./tempo_onlycode.js) is a comment-stripped rendering of the same file (~480 lines vs ~820), with the `main()` report orchestrator removed. It reads as a pure library — import the experiment functions directly, no output, no narrative. Both files are byte-identical in their executable semantics; only the commentary and reporting shell differ.
 
 ## Development
 

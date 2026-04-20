@@ -40,5 +40,3 @@ puppeteer-cache/
 .env.local
 .env.*.local
 
-# Local-only variants of tempo.js (stripped code, scratch renders, etc.)
-tempo_onlycode.js

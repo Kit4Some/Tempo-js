@@ -1,9 +1,30 @@
 {
   "name": "tempo",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
-  "description": "Tempo — a 353-parameter online-learning MLP that predicts browser frame budget overruns. Research artifact.",
+  "description": "Research artifact: can a 353-parameter MLP improve browser frame scheduling? Online learning in pure JS, zero runtime dependencies.",
+  "keywords": [
+    "frame-scheduling",
+    "online-learning",
+    "browser-performance",
+    "machine-learning",
+    "research-artifact",
+    "zero-dependency"
+  ],
+  "author": "Haksung Lee",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Kit4Some/Tempo-js.git"
+  },
+  "homepage": "https://kit4some.github.io/Tempo-js/",
+  "bugs": {
+    "url": "https://github.com/Kit4Some/Tempo-js/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",

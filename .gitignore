@@ -27,4 +27,15 @@ desktop.ini
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+*.log
 .gstack/
+
+# Puppeteer local cache (Chromium download)
+.cache/
+.local-chromium/
+puppeteer-cache/
+
+# Env / secrets (defensive — none currently checked in)
+.env
+.env.local
+.env.*.local

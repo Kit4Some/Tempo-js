@@ -10,11 +10,13 @@ On predictable ramps (sawtooth, scroll-correlated), a well-tuned EMA heuristic b
 
 On unpredictable bursts, the MLP holds its own (within noise).
 
-Three ablations located the source of the gap: not cold-start, not data quantity, not online learning cadence.
+Three ablations in the Phase 5 benchmark ruled out the obvious suspects: not cold-start, not data quantity, not online learning cadence.
 
-The handcrafted EMA encodes a recent-trend decision surface that a 353-param MLP can't learn from this data distribution. The gap is a capacity or inductive-bias limit, not a training one.
+A companion single-file analysis, [`tempo.js`](./tempo.js), isolates the actual mechanism. The MLP has the representational capacity to imitate the EMA heuristic — 98% train agreement when supervised offline on B1's decisions. But online SGD and offline distillation, starting from identical initialization, converge to nearly-orthogonal weight vectors (cosine 0.105; same-seed online runs cluster at 0.9997 for reference). The two optimizers are solving geometrically different problems, not the same problem at different learning rates.
 
-Full numbers in §4 and [docs/RESULTS.md](docs/RESULTS.md).
+The residual gap is a learnability gap under online self-generated data, not a capacity limit of the 353-parameter architecture. Falsifiable repair directions (DAgger, distillation-anchored loss, grid-supervised pretraining) are listed in `tempo.js` §14.
+
+Full Phase 5 numbers in §4 and [docs/RESULTS.md](docs/RESULTS.md). Mechanism in [`tempo.js`](./tempo.js) (run: `node tempo.js`).
 
 ## Key results
 
@@ -35,6 +37,8 @@ Jank-rate means per `(workload, scheduler)` cell, 60 s per run, n = 10 reps (n =
 Row-wise winner in **bold**.
 
 Directional p-values and Cohen's d in [PHASE5_PART2_COMPARE.md](docs/PHASE5_PART2_COMPARE.md). B1 drift between Part 1 and Part 2 was ≤ 0.03 pp on every workload ([PHASE5_PART2_DRIFT.md](docs/PHASE5_PART2_DRIFT.md)).
+
+*These headline numbers are the **symptom**. The companion analysis [`tempo.js`](./tempo.js) isolates the **mechanism** — why the MLP loses to a 3-threshold heuristic despite having 100× more parameters. Four experiments in one zero-dependency script: benchmark reproduction, policy distillation (capacity test), optimizer divergence (learnability test), decision-surface visualization.*
 
 ### On effect sizes
 
@@ -67,6 +71,18 @@ Single-file-per-concern, zero runtime dependencies in the core. `devDependencies
 - [scripts/measure-overhead.js](scripts/measure-overhead.js), [scripts/measure-floor.js](scripts/measure-floor.js) — Part 0 harness probes.
 
 **Tests:** 260 vitest cases covering predictor numerics (analytic-vs-numeric gradcheck), Mann–Whitney U against scipy reference values, bootstrap determinism, harness glue, pure DOM helpers, and the full analyze / benchmark / drift pipeline.
+
+## The single-file artifact
+
+[`tempo.js`](./tempo.js) at the repository root is a ~600-line zero-dependency Node script that reproduces the Phase 5 benchmark and adds three mechanistic experiments the modular codebase doesn't cover:
+
+- **Policy distillation** — can the MLP *represent* B1's policy under offline supervision? (98% train agreement → yes)
+- **Optimizer divergence** — how different are the directions online SGD and distillation descend in weight space? (cosine 0.105 with baseline 0.9997 → geometrically orthogonal)
+- **Decision-surface visualization** — ASCII grid of what each scheduler actually computes over (ema_fast, ema_slow)
+
+Run: `node tempo.js` for the full sawtooth report. Other workloads: `node tempo.js burst` or `node tempo.js scroll` (benchmark only).
+
+This file is the reference for the forthcoming blog post's mechanistic narrative. The Phase 5 production pipeline lives in `src/`, `scripts/`, and `docs/`; `tempo.js` distills *why* the Phase 5 numbers came out the way they did. Both reference the same constants, the same MLP architecture, and the same deterministic seed protocol.
 
 ## Development
 

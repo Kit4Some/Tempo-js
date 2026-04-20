@@ -308,7 +308,7 @@ condition selection at page-load time and are issued per-run by
 
 ## 7. Known limitations
 
-### 7.1 In-distribution training
+### 7.1 In-distribution training (and a deeper mechanism beneath it)
 
 Pretrained weights are trained on data sampled from the same four
 workloads and the same headless-Chrome regime that Part 2 then
@@ -316,6 +316,21 @@ evaluates on. Out-of-distribution generalisation (novel workloads,
 other browsers, real production pages) is explicitly out of scope.
 A reader expecting "pretrained weights transfer to your site" should
 read §6.1 before drawing conclusions.
+
+A separate mechanism is isolated in the companion single-file analysis
+(`tempo.js` at the repository root). Even *in*-distribution, online
+SGD and offline distillation starting from the same initialization
+converge to geometrically different weight vectors (cosine 0.105
+between their Δ from the shared init; same-seed online runs cluster
+at 0.9997 as a noise baseline). The 353-parameter MLP has the
+representational capacity to imitate B1's policy — 98% train
+agreement when supervised offline — but online self-generated data
+produces a different loss landscape than offline supervision. This
+reframes Part 2's residual gap: it is a learnability gap under the
+online data-generation protocol, not a capacity limit of the
+architecture. The mechanism is material for the blog post's
+contribution but does not alter the Part 2 conclusions, which remain
+correct as reported.
 
 ### 7.2 Single seed for Predictor init
 
